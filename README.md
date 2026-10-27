@@ -14,7 +14,7 @@ Affiche : nom du jeu, jaquette (via TitleID), chrono de session, temps total jou
 
 ## Installation
 
-Télécharger `AstrisRPC.zip` depuis les [Releases](https://github.com/seishiiinsan/astris-discord-rich-presence/releases), dézipper, mettre dans `/Applications`. App non notarisée : au 1er lancement, retirer la quarantaine :
+Télécharger `AstrisRPC.dmg` depuis les [Releases](https://github.com/seishiiinsan/astris-discord-rich-presence/releases), l'ouvrir, glisser l'app dans `Applications`. App non notarisée : au 1er lancement, retirer la quarantaine :
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/AstrisRPC.app
@@ -27,7 +27,7 @@ Nouvelle release : changer `VERSION` sur `main` (ou Actions → Release → Run 
 Prérequis : macOS 13+, Xcode ou Command Line Tools.
 
 ```bash
-./build.sh
+./build.sh   # puis ./dmg.sh pour un .dmg
 cp -R build/AstrisRPC.app /Applications/
 open /Applications/AstrisRPC.app
 ```
