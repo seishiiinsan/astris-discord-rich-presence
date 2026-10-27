@@ -39,10 +39,10 @@ final class Updater {
                 let status = (response as? HTTPURLResponse)?.statusCode ?? 0
                 guard status == 200, let data else {
                     let message = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }?["message"]
-                    throw CheckError(errorDescription: "GitHub a répondu \(status)\((message as? String).map { " : \($0)" } ?? "")")
+                    throw CheckError(errorDescription: L10n.tr("GitHub a répondu", "GitHub replied") + " \(status)\((message as? String).map { " : \($0)" } ?? "")")
                 }
                 guard let release = Self.parse(data) else {
-                    throw CheckError(errorDescription: "Réponse GitHub illisible (pas de .zip dans la release ?)")
+                    throw CheckError(errorDescription: L10n.tr("Réponse GitHub illisible (pas de .zip dans la release ?)", "Unreadable GitHub response (no .zip in the release?)"))
                 }
                 return Self.isNewer(release.version, than: Self.currentVersion) ? release : nil
             }

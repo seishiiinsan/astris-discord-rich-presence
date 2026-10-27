@@ -23,10 +23,15 @@ Prérequis : macOS 13+, Discord desktop lancé.
 
 - Icône : manette pleine en jeu, vide sinon, grisée si Astris fermé ou désactivé, ⚠︎ si Discord injoignable (infobulle = état)
 - État : jeu en cours (+ temps déjà joué), Discord connecté — ou « Discord fermé — Ouvrir Discord », cliquable
+- Jeux récents : 5 derniers jeux (avec jaquette), un clic les ouvre dans Astris
 - Afficher sur Discord
 - Ouvrir à la connexion
 - Mettre à jour vers vX (si dispo) / Rechercher les mises à jour… / version
 - Quitter Astris RPC
+
+## Langue
+
+Français si la 1ʳᵉ langue du Mac est le français, anglais sinon (menu, alertes, textes Discord, liens eShop).
 
 ## Mises à jour
 
@@ -66,6 +71,8 @@ Sources/AstrisRPC/
   GameDetector.swift   jeu en cours (lsof + metadata Astris)
   CoverResolver.swift  choix de la jaquette
   EShopResolver.swift  lien eShop du jeu
+  RecentGames.swift    jeux récents (UserDefaults)
+  L10n.swift           textes FR / EN
   DiscordIPC.swift     client IPC Discord minimal
   Updater.swift        mises à jour via GitHub Releases
 Tests/AstrisRPCTests/  tests (CI sur chaque PR)

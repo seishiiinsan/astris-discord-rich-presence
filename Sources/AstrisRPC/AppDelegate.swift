@@ -42,6 +42,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let detector = GameDetector()
     private let covers = CoverResolver()
     private let eShop = EShopResolver()
+    private let recents = RecentGames()
+    private var thumbnails: [String: NSImage] = [:]
+    private var loadingThumbnails: Set<String> = []
     private let updater = Updater()
     private var availableUpdate: Updater.Release?
     private let discord = DiscordIPC(clientID: AppDelegate.clientID)
@@ -59,10 +62,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private let gameItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let discordItem = NSMenuItem(title: "", action: #selector(openDiscord), keyEquivalent: "")
-    private let enabledItem = NSMenuItem(title: "Afficher sur Discord", action: #selector(toggleEnabled), keyEquivalent: "")
-    private let loginItem = NSMenuItem(title: "Ouvrir à la connexion", action: #selector(toggleLogin), keyEquivalent: "")
+    private let enabledItem = NSMenuItem(title: L10n.tr("Afficher sur Discord", "Show on Discord"), action: #selector(toggleEnabled), keyEquivalent: "")
+    private let loginItem = NSMenuItem(title: L10n.tr("Ouvrir à la connexion", "Open at Login"), action: #selector(toggleLogin), keyEquivalent: "")
     private let updateItem = NSMenuItem(title: "", action: #selector(confirmUpdate), keyEquivalent: "")
-    private let checkItem = NSMenuItem(title: "Rechercher les mises à jour…", action: #selector(checkForUpdates), keyEquivalent: "")
+    private let recentsItem = NSMenuItem(title: L10n.tr("Jeux récents", "Recent Games"), action: nil, keyEquivalent: "")
+    private let checkItem = NSMenuItem(title: L10n.tr("Rechercher les mises à jour…", "Check for Updates…"), action: #selector(checkForUpdates), keyEquivalent: "")
     private var discordConnected = false
     private var timer: Timer?
     private var updateTimer: Timer?
@@ -131,6 +135,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func tick() {
         if let astris { detector.poll(pid: astris.processIdentifier) } else { detector.reset() }
+        if let game = detector.game, let rom = detector.romPath, recents.entries.first?.romPath != rom {
+            recents.record(name: game.name, titleID: game.titleID, romPath: rom)
+        }
 
         var presence: Presence?
         if enabled, let astris {
@@ -138,17 +145,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 let played = game.playedTime.flatMap(Self.formatPlayed)
                 presence = Presence(
                     details: game.name,
-                    state: played.map { "Sur Astris · \($0) jouées" } ?? "Sur Astris",
+                    state: played.map { L10n.tr("Sur Astris · \($0) jouées", "On Astris · \($0) played") } ?? L10n.tr("Sur Astris", "On Astris"),
                     start: game.start,
                     image: game.titleID.flatMap(covers.cover(for:)) ?? Self.astrisLogo,
                     imageText: game.name,
                     buttons: [
-                        ("Voir sur l'eShop", eShop.url(titleID: game.titleID, name: game.name)),
+                        (L10n.tr("Voir sur l'eShop", "View on eShop"), eShop.url(titleID: game.titleID, name: game.name)),
                         ("Astris", Self.astrisURL),
                     ])
             } else {
                 presence = Presence(
-                    details: "Dans le menu", state: "Sur Astris", start: astris.launchDate,
+                    details: L10n.tr("Dans le menu", "In the menu"), state: L10n.tr("Sur Astris", "On Astris"), start: astris.launchDate,
                     image: Self.astrisLogo, imageText: "Astris",
                     buttons: [("Astris", Self.astrisURL)])
             }
@@ -219,6 +226,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(discordItem)
         menu.addItem(.separator())
 
+        // Shortcuts.
+        recentsItem.image = Self.symbol("clock.arrow.circlepath")
+        recentsItem.submenu = NSMenu()
+        menu.addItem(recentsItem)
+        menu.addItem(.separator())
+
         // Settings.
         enabledItem.image = Self.symbol("eye")
         loginItem.image = Self.symbol("power")
@@ -241,7 +254,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(versionItem)
         menu.addItem(.separator())
 
-        menu.addItem(NSMenuItem(title: "Quitter Astris RPC", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: L10n.tr("Quitter Astris RPC", "Quit Astris RPC"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem.menu = menu
         refreshMenu(astrisRunning: astris != nil)
     }
@@ -249,30 +262,83 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Always show fresh state when the menu opens, even while polling is paused.
     func menuWillOpen(_ menu: NSMenu) {
         refreshMenu(astrisRunning: astris != nil)
+        refreshRecents()
+    }
+
+    // MARK: - Recent games
+
+    private func refreshRecents() {
+        let submenu = recentsItem.submenu ?? NSMenu()
+        submenu.removeAllItems()
+        recentsItem.isEnabled = !recents.entries.isEmpty
+        for entry in recents.entries {
+            let item = NSMenuItem(title: entry.name, action: #selector(openRecent(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = entry.romPath
+            item.toolTip = entry.romPath
+            item.isEnabled = FileManager.default.fileExists(atPath: entry.romPath)
+            if let id = entry.titleID {
+                item.image = thumbnails[id] ?? Self.symbol("gamecontroller")
+                loadThumbnail(id)
+            } else {
+                item.image = Self.symbol("gamecontroller")
+            }
+            submenu.addItem(item)
+        }
+    }
+
+    /// Downloads the cover once and keeps a menu-sized copy for next time the menu opens.
+    private func loadThumbnail(_ titleID: String) {
+        guard thumbnails[titleID] == nil, !loadingThumbnails.contains(titleID),
+              let link = covers.cover(for: titleID), let url = URL(string: link) else { return }
+        loadingThumbnails.insert(titleID)
+        URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
+            let image = data.flatMap(NSImage.init(data:))
+            DispatchQueue.main.async {
+                guard let self else { return }
+                loadingThumbnails.remove(titleID)
+                guard let image else { return }
+                image.size = NSSize(width: 20, height: 20)
+                thumbnails[titleID] = image
+            }
+        }.resume()
+    }
+
+    @objc private func openRecent(_ sender: NSMenuItem) {
+        guard let path = sender.representedObject as? String else { return }
+        let astrisApp = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "V380-Ori.Astris")
+            ?? URL(fileURLWithPath: "/Applications/Astris.app")
+        NSWorkspace.shared.open([URL(fileURLWithPath: path)], withApplicationAt: astrisApp, configuration: .init()) { _, error in
+            guard let error else { return }
+            DispatchQueue.main.async {
+                NSApp.activate(ignoringOtherApps: true)
+                NSAlert(error: error).runModal()
+            }
+        }
     }
 
     private func refreshMenu(astrisRunning: Bool) {
         if !astrisRunning {
-            gameItem.title = "Astris n'est pas ouvert"
+            gameItem.title = L10n.tr("Astris n'est pas ouvert", "Astris isn't open")
             gameItem.image = Self.symbol("moon.zzz")
         } else if let game = detector.game {
             gameItem.title = game.name
             gameItem.image = Self.symbol("gamecontroller.fill", color: .systemGreen)
         } else {
-            gameItem.title = "Astris ouvert, aucun jeu lancé"
+            gameItem.title = L10n.tr("Astris ouvert, aucun jeu lancé", "Astris open, no game running")
             gameItem.image = Self.symbol("gamecontroller")
         }
         if #available(macOS 14.4, *) {
-            gameItem.subtitle = detector.game?.playedTime.flatMap(Self.formatPlayed).map { "\($0) jouées avant cette session" }
+            gameItem.subtitle = detector.game?.playedTime.flatMap(Self.formatPlayed).map { L10n.tr("\($0) jouées avant cette session", "\($0) played before this session") }
         }
 
         // Discord row doubles as the fix: click to open Discord when it's unreachable.
         if discordConnected {
-            discordItem.title = "Connecté à Discord"
+            discordItem.title = L10n.tr("Connecté à Discord", "Connected to Discord")
             discordItem.image = Self.symbol("checkmark.circle.fill", color: .systemGreen)
             discordItem.isEnabled = false
         } else {
-            discordItem.title = "Discord fermé — Ouvrir Discord"
+            discordItem.title = L10n.tr("Discord fermé — Ouvrir Discord", "Discord closed — Open Discord")
             discordItem.image = Self.symbol("exclamationmark.triangle.fill", color: .systemOrange)
             discordItem.isEnabled = true
         }
@@ -291,10 +357,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Filled controller in game, outline otherwise, dimmed when idle, warning if Discord is unreachable.
     private func refreshIcon(astrisRunning: Bool) {
         let (symbol, label): (String, String) = {
-            if !enabled { return ("gamecontroller", "Astris RPC — désactivé") }
-            if astrisRunning && !discordConnected { return ("exclamationmark.triangle", "Astris RPC — Discord injoignable") }
+            if !enabled { return ("gamecontroller", L10n.tr("Astris RPC — désactivé", "Astris RPC — off")) }
+            if astrisRunning && !discordConnected { return ("exclamationmark.triangle", L10n.tr("Astris RPC — Discord injoignable", "Astris RPC — Discord unreachable")) }
             if let game = detector.game { return ("gamecontroller.fill", "Astris RPC — \(game.name)") }
-            return ("gamecontroller", astrisRunning ? "Astris RPC — menu Astris" : "Astris RPC — Astris fermé")
+            return ("gamecontroller", astrisRunning ? L10n.tr("Astris RPC — menu Astris", "Astris RPC — Astris menu") : L10n.tr("Astris RPC — Astris fermé", "Astris RPC — Astris closed"))
         }()
         guard let button = statusItem.button else { return }
         if symbol != iconSymbol {
@@ -339,7 +405,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 if manual {
                     NSApp.activate(ignoringOtherApps: true)
                     let alert = NSAlert()
-                    alert.messageText = "Impossible de vérifier les mises à jour"
+                    alert.messageText = L10n.tr("Impossible de vérifier les mises à jour", "Couldn't check for updates")
                     alert.informativeText = error.localizedDescription
                     alert.runModal()
                 }
@@ -348,7 +414,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let release = try? result.get()
             availableUpdate = release
             if let release {
-                updateItem.title = "Mettre à jour vers v\(release.version)"
+                updateItem.title = L10n.tr("Mettre à jour vers v\(release.version)", "Update to v\(release.version)")
                 updateItem.isHidden = false
             } else {
                 updateItem.isHidden = true
@@ -358,7 +424,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 confirmUpdate()
             } else {
                 let alert = NSAlert()
-                alert.messageText = "Astris RPC est à jour (v\(Updater.currentVersion))"
+                alert.messageText = L10n.tr("Astris RPC est à jour (v\(Updater.currentVersion))", "Astris RPC is up to date (v\(Updater.currentVersion))")
                 NSApp.activate(ignoringOtherApps: true)
                 alert.runModal()
             }
@@ -369,10 +435,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func confirmUpdate() {
         guard let release = availableUpdate else { return }
         let alert = NSAlert()
-        alert.messageText = "Version \(release.version) disponible"
+        alert.messageText = L10n.tr("Version \(release.version) disponible", "Version \(release.version) available")
         alert.informativeText = release.notes ?? ""
-        alert.addButton(withTitle: "Mettre à jour")
-        alert.addButton(withTitle: "Plus tard")
+        alert.addButton(withTitle: L10n.tr("Mettre à jour", "Update"))
+        alert.addButton(withTitle: L10n.tr("Plus tard", "Later"))
         NSApp.activate(ignoringOtherApps: true)
         if alert.runModal() == .alertFirstButtonReturn { installUpdate() }
     }
@@ -383,11 +449,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func installUpdate() {
         guard let release = availableUpdate else { return }
-        updateItem.title = "Téléchargement de v\(release.version)…"
+        updateItem.title = L10n.tr("Téléchargement de v\(release.version)…", "Downloading v\(release.version)…")
         updateItem.isEnabled = false
         updater.install(release) { [weak self] error in
             guard let self else { return }
-            updateItem.title = "Mettre à jour vers v\(release.version)"
+            updateItem.title = L10n.tr("Mettre à jour vers v\(release.version)", "Update to v\(release.version)")
             updateItem.isEnabled = true
             if let error {
                 NSApp.activate(ignoringOtherApps: true)
