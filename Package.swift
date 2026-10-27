@@ -5,6 +5,7 @@ let package = Package(
     name: "AstrisRPC",
     platforms: [.macOS(.v13)],
     targets: [
-        .executableTarget(name: "AstrisRPC", path: "Sources/AstrisRPC")
+        .executableTarget(name: "AstrisRPC", path: "Sources/AstrisRPC"),
+        .testTarget(name: "AstrisRPCTests", dependencies: ["AstrisRPC"], path: "Tests/AstrisRPCTests"),
     ]
 )

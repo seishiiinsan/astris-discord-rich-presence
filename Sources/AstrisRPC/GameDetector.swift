@@ -14,17 +14,25 @@ final class GameDetector {
     private static let romExtensions: Set<String> = ["xci", "xcz", "nsp", "nsz", "nro"]
     private static let titleIDRegex = try! NSRegularExpression(pattern: #"\[?(01[0-9A-Fa-f]{14})\]?"#)
 
+    /// lsof is a subprocess: only fall back to it this often.
+    private static let lsofInterval: TimeInterval = 6
+
     private(set) var game: Game?
     private var romPath: String?
+    private var lastLsof = Date.distantPast
+    private var lsofROM: String?
 
     func reset() {
         game = nil
         romPath = nil
+        lsofROM = nil
+        lastLsof = .distantPast
     }
 
     func poll(pid: pid_t) {
         guard let rom = openROM(pid: pid) else {
-            reset()
+            game = nil
+            romPath = nil
             return
         }
         guard rom != romPath else { return }
@@ -34,23 +42,61 @@ final class GameDetector {
 
     // MARK: - ROM
 
+    /// Cheap path: the process' open file descriptors (libproc). Fallback: lsof,
+    /// which also sees memory-mapped files, throttled to `lsofInterval`.
     private func openROM(pid: pid_t) -> String? {
+        if let rom = Self.openFiles(pid: pid)?.first(where: Self.isROM) {
+            return rom
+        }
+        if Date().timeIntervalSince(lastLsof) >= Self.lsofInterval {
+            lastLsof = Date()
+            lsofROM = lsofFiles(pid: pid).first(where: Self.isROM)
+        }
+        return lsofROM
+    }
+
+    static func isROM(_ path: String) -> Bool {
+        romExtensions.contains((path as NSString).pathExtension.lowercased())
+    }
+
+    private static func openFiles(pid: pid_t) -> [String]? {
+        let size = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, nil, 0)
+        guard size > 0 else { return nil }
+        let stride = MemoryLayout<proc_fdinfo>.stride
+        var fds = [proc_fdinfo](repeating: proc_fdinfo(), count: Int(size) / stride + 16)
+        let got = fds.withUnsafeMutableBytes {
+            proc_pidinfo(pid, PROC_PIDLISTFDS, 0, $0.baseAddress, Int32($0.count))
+        }
+        guard got > 0 else { return nil }
+
+        var paths: [String] = []
+        for fd in fds.prefix(Int(got) / stride) where fd.proc_fdtype == UInt32(PROX_FDTYPE_VNODE) {
+            var info = vnode_fdinfowithpath()
+            let infoSize = Int32(MemoryLayout<vnode_fdinfowithpath>.size)
+            guard proc_pidfdinfo(pid, fd.proc_fd, PROC_PIDFDVNODEPATHINFO, &info, infoSize) == infoSize else { continue }
+            let path = withUnsafeBytes(of: &info.pvip.vip_path) { raw in
+                String(cString: raw.bindMemory(to: CChar.self).baseAddress!)
+            }
+            paths.append(path)
+        }
+        return paths
+    }
+
+    private func lsofFiles(pid: pid_t) -> [String] {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
         task.arguments = ["-n", "-P", "-p", String(pid), "-Fn"]
         let pipe = Pipe()
         task.standardOutput = pipe
         task.standardError = FileHandle.nullDevice
-        do { try task.run() } catch { return nil }
+        do { try task.run() } catch { return [] }
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         task.waitUntilExit()
 
         return String(decoding: data, as: UTF8.self)
             .split(separator: "\n")
-            .lazy
             .filter { $0.hasPrefix("n/") }
             .map { String($0.dropFirst()) }
-            .first { Self.romExtensions.contains(($0 as NSString).pathExtension.lowercased()) }
     }
 
     private func makeGame(rom: String) -> Game {
@@ -125,7 +171,7 @@ final class GameDetector {
 
     // MARK: - Helpers
 
-    private static func titleID(in text: String) -> String? {
+    static func titleID(in text: String) -> String? {
         let range = NSRange(text.startIndex..., in: text)
         guard let m = titleIDRegex.firstMatch(in: text, range: range),
               let r = Range(m.range(at: 1), in: text) else { return nil }
@@ -133,7 +179,7 @@ final class GameDetector {
     }
 
     /// "Super_Mario [0100...][v0] (EU)" -> "Super Mario"
-    private static func cleanName(_ name: String) -> String {
+    static func cleanName(_ name: String) -> String {
         let cleaned = name
             .replacingOccurrences(of: #"\[[^\]]*\]|\([^)]*\)"#, with: "", options: .regularExpression)
             .replacingOccurrences(of: "_", with: " ")
@@ -143,7 +189,7 @@ final class GameDetector {
     }
 
     /// .NET TimeSpan "[d.]hh:mm:ss[.fffffff]", or plain seconds.
-    private static func parsePlayed(_ value: Any?) -> TimeInterval? {
+    static func parsePlayed(_ value: Any?) -> TimeInterval? {
         if let n = value as? NSNumber { return n.doubleValue }
         guard let string = value as? String else { return nil }
         let parts = string.split(separator: ":")
@@ -157,7 +203,7 @@ final class GameDetector {
     }
 
     /// Ryujinx writes e.g. "2026-10-27T10:44:12.1234567Z"; keep second precision.
-    private static func parseDate(_ string: String) -> Date? {
+    static func parseDate(_ string: String) -> Date? {
         guard string.count >= 19 else { return nil }
         let formatter = ISO8601DateFormatter()
         return formatter.date(from: String(string.prefix(19)) + "Z")
