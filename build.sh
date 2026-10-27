@@ -8,7 +8,8 @@ swift build -c release --arch arm64
 APP=build/AstrisRPC.app
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp .build/arm64-apple-macosx/release/AstrisRPC "$APP/Contents/MacOS/AstrisRPC"
+BIN="$(swift build -c release --arch arm64 --show-bin-path)/AstrisRPC"
+cp "$BIN" "$APP/Contents/MacOS/AstrisRPC"
 
 # Icon: Resources/AppIcon.png (1024px) -> AppIcon.icns
 ICONSET=build/AppIcon.iconset
