@@ -3,6 +3,8 @@ name: Release
 on:
   push:
     tags: ["v*"]
+    branches: [main]
+    paths: [VERSION]
   workflow_dispatch:
     inputs:
       version:
@@ -21,7 +23,9 @@ jobs:
       - name: Version
         id: v
         run: |
-          if [[ "$GITHUB_REF_TYPE" == tag ]]; then V="${GITHUB_REF_NAME#v}"; else V="${{ inputs.version }}"; fi
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then V="${GITHUB_REF_NAME#v}"
+          elif [[ -n "${{ inputs.version }}" ]]; then V="${{ inputs.version }}"
+          else V="$(tr -d '[:space:]' < VERSION)"; fi
           echo "version=${V#v}" >> "$GITHUB_OUTPUT"
 
       - name: Build app
