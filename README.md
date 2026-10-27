@@ -11,6 +11,16 @@ Affiche : nom du jeu, jaquette (via TitleID), temps de jeu. Hors jeu : « Dans l
 - Parle à Discord via le socket local `discord-ipc-N`.
 - Jaquette : `https://tinfoil.media/ti/<TitleID>/512/512`.
 
+## Installation
+
+Télécharger `AstrisRPC.zip` depuis les [Releases](https://github.com/seishiiinsan/astris-discord-rich-presence/releases), dézipper, mettre dans `/Applications`. App non notarisée : au 1er lancement, retirer la quarantaine :
+
+```bash
+xattr -dr com.apple.quarantine /Applications/AstrisRPC.app
+```
+
+Nouvelle release : `git tag vX.Y.Z && git push origin vX.Y.Z` (CI GitHub Actions build + publie).
+
 ## Build
 
 Prérequis : macOS 13+, Xcode ou Command Line Tools.
