@@ -13,6 +13,7 @@ final class GameSettings: ObservableObject {
     private static let showKey = "presenceEnabled"
     private static let folderKey = "gamesFolder"
     private static let prefsKey = "gamePrefs"
+    private static let titleIDsKey = "knownTitleIDs"
 
     private let defaults: UserDefaults
 
@@ -30,12 +31,23 @@ final class GameSettings: ObservableObject {
         }
     }
 
+    /// ROM file name → TitleID, remembered whenever a game is seen running.
+    private(set) var knownTitleIDs: [String: String] {
+        didSet { defaults.set(knownTitleIDs, forKey: Self.titleIDsKey) }
+    }
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         showOnDiscord = defaults.object(forKey: Self.showKey) as? Bool ?? true
         gamesFolder = defaults.string(forKey: Self.folderKey).map { URL(fileURLWithPath: $0) }
         prefs = defaults.data(forKey: Self.prefsKey)
             .flatMap { try? JSONDecoder().decode([String: GamePrefs].self, from: $0) } ?? [:]
+        knownTitleIDs = defaults.dictionary(forKey: Self.titleIDsKey) as? [String: String] ?? [:]
+    }
+
+    func rememberTitleID(_ titleID: String, for romPath: String) {
+        let key = Self.key(for: romPath)
+        if knownTitleIDs[key] != titleID { knownTitleIDs[key] = titleID }
     }
 
     static func key(for romPath: String) -> String {

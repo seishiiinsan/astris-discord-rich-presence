@@ -129,7 +129,9 @@ final class GameDetector {
         let json: [String: Any]
     }
 
-    private var gamesDirectories: [URL] {
+    private var gamesDirectories: [URL] { Self.astrisGamesDirectories }
+
+    static var astrisGamesDirectories: [URL] {
         let home = FileManager.default.homeDirectoryForCurrentUser
         return [
             "Library/Application Support/Astris/games",
@@ -167,6 +169,29 @@ final class GameDetector {
         let json = (try? Data(contentsOf: file))
             .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
         return MetadataEntry(titleID: titleID, date: date, json: json)
+    }
+
+    /// Normalized game title → TitleID, from the `title` Astris stores in each game's metadata.
+    static func metadataTitleIndex() -> [String: String] {
+        var index: [String: String] = [:]
+        for dir in astrisGamesDirectories {
+            for game in (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? [] {
+                let file = game.appendingPathComponent("gui/metadata.json")
+                guard let data = try? Data(contentsOf: file),
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      let title = json["title"] as? String, !title.isEmpty
+                else { continue }
+                index[normalize(title)] = game.lastPathComponent.uppercased()
+            }
+        }
+        return index
+    }
+
+    /// "Super Mario Bros.™ Wonder" -> "supermariobroswonder"
+    static func normalize(_ name: String) -> String {
+        name.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+            .unicodeScalars.filter(CharacterSet.alphanumerics.contains)
+            .map(String.init).joined()
     }
 
     // MARK: - Helpers

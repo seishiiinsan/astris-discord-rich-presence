@@ -13,6 +13,10 @@ final class SettingsWindowController: NSWindowController {
         general.sizingOptions = .preferredContentSize
         games.sizingOptions = .preferredContentSize
 
+        // The window title follows the selected tab.
+        general.title = L10n.tr("Général", "General")
+        games.title = L10n.tr("Jeux", "Games")
+
         let generalItem = NSTabViewItem(viewController: general)
         generalItem.label = L10n.tr("Général", "General")
         generalItem.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: nil)
@@ -81,6 +85,7 @@ struct GeneralSettingsView: View {
                     "Tes amis voient le jeu, sa jaquette et ton temps de jeu.",
                     "Friends see the game, its cover art and your play time."))
                     .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             Section {
@@ -110,6 +115,7 @@ struct GeneralSettingsView: View {
                     "Les jeux de ce dossier apparaissent dans l'onglet Jeux.",
                     "Games in this folder appear in the Games tab."))
                     .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .formStyle(.grouped)
@@ -227,10 +233,11 @@ struct GamesSettingsView: View {
 
     private func reload() {
         guard let folder = settings.gamesFolder else { games = []; return }
-        let known = Dictionary(
-            recents.entries.compactMap { entry in entry.titleID.map { ((entry.romPath as NSString).lastPathComponent, $0) } },
-            uniquingKeysWith: { first, _ in first })
-        games = GameLibrary.scan(folder, known: known)
+        var known = settings.knownTitleIDs
+        for entry in recents.entries {
+            if let id = entry.titleID { known[(entry.romPath as NSString).lastPathComponent] = id }
+        }
+        games = GameLibrary.scan(folder, known: known, titles: GameDetector.metadataTitleIndex())
         if selection == nil || !games.contains(where: { $0.id == selection }) {
             selection = games.first?.id
         }
@@ -312,6 +319,7 @@ private struct GameDetailView: View {
                          : L10n.tr("Discord affiche le nom, la jaquette et le temps de jeu.",
                                    "Discord shows the name, cover and play time."))
                         .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 Section {
                     TextField(L10n.tr("Nom affiché", "Display name"), text: $name, prompt: Text(game.name))
@@ -321,6 +329,7 @@ private struct GameDetailView: View {
                 } footer: {
                     Text(L10n.tr("Laisse vide pour garder le nom détecté.", "Leave empty to keep the detected name."))
                         .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
             .formStyle(.grouped)
