@@ -2,7 +2,7 @@
 # Build AstrisRPC.app (menu bar, no Dock icon) into ./build
 set -euo pipefail
 cd "$(dirname "$0")"
-VERSION="${VERSION:-1.0.0}"
+VERSION="${VERSION:-$(tr -d "[:space:]" < VERSION)}"
 
 swift build -c release --arch arm64
 APP=build/AstrisRPC.app
