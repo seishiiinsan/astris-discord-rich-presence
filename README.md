@@ -10,7 +10,7 @@ Affiche : nom du jeu, jaquette (via TitleID), temps de jeu. Hors jeu : « Dans l
 - Repère le jeu ouvert par Astris (`lsof` : `.xci/.xcz/.nsp/.nsz/.nro`) et son TitleID via `~/Library/Application Support/Astris/games/<TitleID>/gui/metadata.json` (modifié au lancement). Aucune permission macOS requise.
 - Parle à Discord via le socket local `discord-ipc-N`.
 - Jaquette : `https://tinfoil.media/ti/<TitleID>/512/512`.
-- Logo Astris (menu) : asset `astris` à uploader dans le [portail Discord](https://discord.com/developers/applications) → app → Rich Presence → Art Assets.
+- Logo Astris (menu) : `Resources/AstrisLogo.png` servi via raw.githubusercontent.
 
 ## Installation
 
