@@ -14,20 +14,43 @@ final class Updater {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
     }
 
-    /// Calls back on the main queue with a release newer than the running app, or nil.
-    func check(_ completion: @escaping (Release?) -> Void) {
+    struct CheckError: LocalizedError {
+        let errorDescription: String?
+    }
+
+    private let session: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
+        config.urlCache = nil
+        config.timeoutIntervalForRequest = 15
+        return URLSession(configuration: config)
+    }()
+
+    /// Calls back on the main queue with a release newer than the running app (nil if up to date).
+    func check(_ completion: @escaping (Result<Release?, Error>) -> Void) {
         var request = URLRequest(url: Self.latestURL)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        URLSession.shared.dataTask(with: request) { data, _, _ in
-            let release = data.flatMap(Self.parse)
-                .flatMap { Self.isNewer($0.version, than: Self.currentVersion) ? $0 : nil }
-            DispatchQueue.main.async { completion(release) }
+        request.setValue("AstrisRPC/\(Self.currentVersion)", forHTTPHeaderField: "User-Agent")
+        session.dataTask(with: request) { data, response, error in
+            let result = Result { () throws -> Release? in
+                if let error { throw error }
+                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                guard status == 200, let data else {
+                    let message = data.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }?["message"]
+                    throw CheckError(errorDescription: "GitHub a répondu \(status)\((message as? String).map { " : \($0)" } ?? "")")
+                }
+                guard let release = Self.parse(data) else {
+                    throw CheckError(errorDescription: "Réponse GitHub illisible (pas de .zip dans la release ?)")
+                }
+                return Self.isNewer(release.version, than: Self.currentVersion) ? release : nil
+            }
+            DispatchQueue.main.async { completion(result) }
         }.resume()
     }
 
     /// Downloads the release, replaces this app bundle and relaunches it.
     func install(_ release: Release, completion: @escaping (Error?) -> Void) {
-        URLSession.shared.downloadTask(with: release.zipURL) { file, _, error in
+        session.downloadTask(with: release.zipURL) { file, _, error in
             let result = Result { () throws -> Void in
                 if let error { throw error }
                 guard let file else { throw URLError(.badServerResponse) }
