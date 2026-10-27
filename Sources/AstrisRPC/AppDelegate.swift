@@ -332,10 +332,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             gameItem.subtitle = detector.game?.playedTime.flatMap(Self.formatPlayed).map { L10n.tr("\($0) jouées avant cette session", "\($0) played before this session") }
         }
 
-        // Discord row doubles as the fix: click to open Discord when it's unreachable.
+        // Discord row doubles as the fix: click to open Discord when it isn't running.
+        // Without Astris there's nothing to show, so no IPC connection: judge by the running app.
         if discordConnected {
             discordItem.title = L10n.tr("Connecté à Discord", "Connected to Discord")
             discordItem.image = Self.symbol("checkmark.circle.fill", color: .systemGreen)
+            discordItem.isEnabled = false
+        } else if Self.isDiscordRunning() {
+            discordItem.title = astrisRunning
+                ? L10n.tr("Connexion à Discord…", "Connecting to Discord…")
+                : L10n.tr("Discord ouvert", "Discord open")
+            discordItem.image = Self.symbol("checkmark.circle", color: .secondaryLabelColor)
             discordItem.isEnabled = false
         } else {
             discordItem.title = L10n.tr("Discord fermé — Ouvrir Discord", "Discord closed — Open Discord")
@@ -358,7 +365,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func refreshIcon(astrisRunning: Bool) {
         let (symbol, label): (String, String) = {
             if !enabled { return ("gamecontroller", L10n.tr("Astris RPC — désactivé", "Astris RPC — off")) }
-            if astrisRunning && !discordConnected { return ("exclamationmark.triangle", L10n.tr("Astris RPC — Discord injoignable", "Astris RPC — Discord unreachable")) }
+            if astrisRunning && !discordConnected && !Self.isDiscordRunning() { return ("exclamationmark.triangle", L10n.tr("Astris RPC — Discord injoignable", "Astris RPC — Discord unreachable")) }
             if let game = detector.game { return ("gamecontroller.fill", "Astris RPC — \(game.name)") }
             return ("gamecontroller", astrisRunning ? L10n.tr("Astris RPC — menu Astris", "Astris RPC — Astris menu") : L10n.tr("Astris RPC — Astris fermé", "Astris RPC — Astris closed"))
         }()
@@ -370,6 +377,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         button.toolTip = label
         button.setAccessibilityLabel(label)
         button.appearsDisabled = !enabled || !astrisRunning
+    }
+
+    static func isDiscordRunning() -> Bool {
+        NSWorkspace.shared.runningApplications.contains {
+            $0.bundleIdentifier?.lowercased().hasPrefix("com.hnc.discord") == true
+        }
     }
 
     @objc private func openDiscord() {
