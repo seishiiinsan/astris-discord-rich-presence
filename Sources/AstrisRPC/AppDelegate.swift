@@ -225,8 +225,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: - Updates
 
     private func checkUpdates(manual: Bool) {
-        updater.check { [weak self] release in
+        updater.check { [weak self] result in
             guard let self else { return }
+            if case .failure(let error) = result {
+                if manual {
+                    NSApp.activate(ignoringOtherApps: true)
+                    let alert = NSAlert()
+                    alert.messageText = "Impossible de vérifier les mises à jour"
+                    alert.informativeText = error.localizedDescription
+                    alert.runModal()
+                }
+                return
+            }
+            let release = try? result.get()
             availableUpdate = release
             if let release {
                 updateItem.title = "Mettre à jour vers v\(release.version)"
