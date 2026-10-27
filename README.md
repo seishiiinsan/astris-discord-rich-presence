@@ -39,3 +39,4 @@ Puis menu 🎮 → « Lancer au démarrage ».
 - État jeu / Discord
 - Activer Rich Presence
 - Lancer au démarrage
+- Mise à jour auto : vérifie les releases GitHub au lancement puis toutes les 6 h, installe et relance en un clic
