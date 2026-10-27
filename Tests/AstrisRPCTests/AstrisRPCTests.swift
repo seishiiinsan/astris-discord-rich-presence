@@ -119,3 +119,49 @@ final class RecentGamesTests: XCTestCase {
         XCTAssertEqual(RecentGames(defaults: defaults).entries, recents.entries, "persisted")
     }
 }
+
+final class GameSettingsTests: XCTestCase {
+    private func makeDefaults() throws -> UserDefaults {
+        try XCTUnwrap(UserDefaults(suiteName: "AstrisRPCTests-\(UUID().uuidString)"))
+    }
+
+    func testHiddenAndCustomNamePersistByFileName() throws {
+        let defaults = try makeDefaults()
+        let settings = GameSettings(defaults: defaults)
+        XCTAssertFalse(settings.isHidden("/a/Mario.xcz"))
+
+        settings.setHidden(true, for: "/a/Mario.xcz")
+        settings.setCustomName("  Mario Bros  ", for: "/a/Mario.xcz")
+        let reloaded = GameSettings(defaults: defaults)
+        XCTAssertTrue(reloaded.isHidden("/moved/folder/Mario.xcz"), "keyed by file name")
+        XCTAssertEqual(reloaded.displayName(for: "/a/Mario.xcz", detected: "x"), "Mario Bros")
+    }
+
+    func testEmptyNameAndDefaultsClearEntry() throws {
+        let settings = GameSettings(defaults: try makeDefaults())
+        settings.setCustomName("Zelda", for: "/z.nsp")
+        settings.setCustomName("   ", for: "/z.nsp")
+        XCTAssertEqual(settings.displayName(for: "/z.nsp", detected: "Detected"), "Detected")
+        XCTAssertTrue(settings.prefs.isEmpty, "default prefs are not stored")
+    }
+
+    func testShowOnDiscordDefaultsToTrue() throws {
+        XCTAssertTrue(GameSettings(defaults: try makeDefaults()).showOnDiscord)
+    }
+}
+
+final class GameLibraryTests: XCTestCase {
+    func testScanFindsROMsSortedWithTitleIDs() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let sub = root.appendingPathComponent("Nintendo")
+        try FileManager.default.createDirectory(at: sub, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        for file in ["Zelda [0100F2C0115B6000].nsp", "Nintendo/Mario.xcz", "notes.txt", ".hidden.xci"] {
+            FileManager.default.createFile(atPath: root.appendingPathComponent(file).path, contents: Data())
+        }
+
+        let games = GameLibrary.scan(root, known: ["Mario.xcz": "0100EA80032EA000"])
+        XCTAssertEqual(games.map(\.name), ["Mario", "Zelda"])
+        XCTAssertEqual(games.map(\.titleID), ["0100EA80032EA000", "0100F2C0115B6000"])
+    }
+}

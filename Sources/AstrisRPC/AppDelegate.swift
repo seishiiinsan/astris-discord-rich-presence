@@ -1,5 +1,5 @@
 import AppKit
-import ServiceManagement
+import Combine
 
 struct Presence: Equatable {
     var details: String
@@ -33,7 +33,6 @@ struct Presence: Equatable {
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     static let clientID = "1564590186887774209"
-    private static let enabledKey = "presenceEnabled"
     private static let astrisLogo =
         "https://raw.githubusercontent.com/seishiiinsan/astris-discord-rich-presence/main/Resources/AstrisLogo.png"
 
@@ -63,7 +62,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let gameItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let discordItem = NSMenuItem(title: "", action: #selector(openDiscord), keyEquivalent: "")
     private let enabledItem = NSMenuItem(title: L10n.tr("Afficher sur Discord", "Show on Discord"), action: #selector(toggleEnabled), keyEquivalent: "")
-    private let loginItem = NSMenuItem(title: L10n.tr("Ouvrir à la connexion", "Open at Login"), action: #selector(toggleLogin), keyEquivalent: "")
+    private let settingsItem = NSMenuItem(title: L10n.tr("Réglages…", "Settings…"), action: #selector(openSettings), keyEquivalent: ",")
     private let updateItem = NSMenuItem(title: "", action: #selector(confirmUpdate), keyEquivalent: "")
     private let recentsItem = NSMenuItem(title: L10n.tr("Jeux récents", "Recent Games"), action: nil, keyEquivalent: "")
     private let checkItem = NSMenuItem(title: L10n.tr("Rechercher les mises à jour…", "Check for Updates…"), action: #selector(checkForUpdates), keyEquivalent: "")
@@ -71,14 +70,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var timer: Timer?
     private var updateTimer: Timer?
 
+    private let settings = GameSettings.shared
+    private var settingsWindow: SettingsWindowController?
+    private var settingsObserver: AnyCancellable?
+
     private var enabled: Bool {
-        get { UserDefaults.standard.object(forKey: Self.enabledKey) as? Bool ?? true }
-        set { UserDefaults.standard.set(newValue, forKey: Self.enabledKey) }
+        get { settings.showOnDiscord }
+        set { settings.showOnDiscord = newValue }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         signal(SIGPIPE, SIG_IGN)
         setUpMenu()
+        // Settings window edits apply right away.
+        settingsObserver = settings.objectWillChange.sink { [weak self] _ in
+            DispatchQueue.main.async { self?.tick() }
+        }
         let center = NSWorkspace.shared.notificationCenter
         center.addObserver(self, selector: #selector(appLaunched(_:)),
                            name: NSWorkspace.didLaunchApplicationNotification, object: nil)
@@ -141,14 +148,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         var presence: Presence?
         if enabled, let astris {
-            if let game = detector.game {
+            if let game = detector.game, let rom = detector.romPath, settings.isHidden(rom) {
+                // Blacklisted: say we're playing, never what.
+                presence = Presence(
+                    details: L10n.tr("En jeu", "Playing"), state: L10n.tr("Sur Astris", "On Astris"), start: game.start,
+                    image: Self.astrisLogo, imageText: "Astris",
+                    buttons: [("Astris", Self.astrisURL)])
+            } else if let game = detector.game {
+                let name = detector.romPath.map { settings.displayName(for: $0, detected: game.name) } ?? game.name
                 let played = game.playedTime.flatMap(Self.formatPlayed)
                 presence = Presence(
-                    details: game.name,
+                    details: name,
                     state: played.map { L10n.tr("Sur Astris · \($0) jouées", "On Astris · \($0) played") } ?? L10n.tr("Sur Astris", "On Astris"),
                     start: game.start,
                     image: game.titleID.flatMap(covers.cover(for:)) ?? Self.astrisLogo,
-                    imageText: game.name,
+                    imageText: name,
                     buttons: [
                         (L10n.tr("Voir sur l'eShop", "View on eShop"), eShop.url(titleID: game.titleID, name: game.name)),
                         ("Astris", Self.astrisURL),
@@ -234,8 +248,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // Settings.
         enabledItem.image = Self.symbol("eye")
-        loginItem.image = Self.symbol("power")
-        for item in [enabledItem, loginItem] {
+        settingsItem.image = Self.symbol("gearshape")
+        for item in [enabledItem, settingsItem] {
             item.target = self
             menu.addItem(item)
         }
@@ -272,7 +286,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         submenu.removeAllItems()
         recentsItem.isEnabled = !recents.entries.isEmpty
         for entry in recents.entries {
-            let item = NSMenuItem(title: entry.name, action: #selector(openRecent(_:)), keyEquivalent: "")
+            let item = NSMenuItem(title: settings.displayName(for: entry.romPath, detected: entry.name), action: #selector(openRecent(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = entry.romPath
             item.toolTip = entry.romPath
@@ -351,7 +365,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         enabledItem.state = enabled ? .on : .off
-        loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
         refreshIcon(astrisRunning: astrisRunning)
     }
 
@@ -396,17 +409,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         tick()
     }
 
-    @objc private func toggleLogin() {
-        do {
-            if SMAppService.mainApp.status == .enabled {
-                try SMAppService.mainApp.unregister()
-            } else {
-                try SMAppService.mainApp.register()
-            }
-        } catch {
-            NSAlert(error: error).runModal()
+    @objc private func openSettings() {
+        if settingsWindow == nil {
+            settingsWindow = SettingsWindowController(settings: settings, covers: covers, recents: recents)
         }
-        refreshMenu(astrisRunning: astris != nil)
+        settingsWindow?.show()
     }
 
     // MARK: - Updates
