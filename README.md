@@ -21,11 +21,12 @@ Prérequis : macOS 13+, Discord desktop lancé.
 
 ## Menu
 
-- Icône : manette pleine en jeu, vide sinon, grisée si Astris fermé ou RPC coupé, ⚠︎ si Discord injoignable
-- État : jeu en cours, connexion Discord
-- Activer Rich Presence
-- Lancer au démarrage
+- Icône : manette pleine en jeu, vide sinon, grisée si Astris fermé ou désactivé, ⚠︎ si Discord injoignable (infobulle = état)
+- État : jeu en cours (+ temps déjà joué), Discord connecté — ou « Discord fermé — Ouvrir Discord », cliquable
+- Afficher sur Discord
+- Ouvrir à la connexion
 - Mettre à jour vers vX (si dispo) / Rechercher les mises à jour… / version
+- Quitter Astris RPC
 
 ## Mises à jour
 
