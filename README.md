@@ -21,8 +21,8 @@ Prérequis : macOS 13+, Discord desktop lancé.
 
 ## Menu
 
-- Icône : manette pleine en jeu, vide sinon, grisée si Astris fermé ou désactivé, ⚠︎ si Discord injoignable (infobulle = état)
-- État : jeu en cours (+ temps déjà joué), Discord connecté — ou « Discord fermé — Ouvrir Discord », cliquable
+- Icône : manette pleine en jeu, vide sinon, grisée si Astris fermé ou désactivé, ⚠︎ si Discord fermé pendant qu'Astris tourne (infobulle = état)
+- État : jeu en cours (+ temps déjà joué), Discord connecté / ouvert — ou « Discord fermé — Ouvrir Discord », cliquable
 - Jeux récents : 5 derniers jeux (avec jaquette), un clic les ouvre dans Astris
 - Afficher sur Discord
 - Ouvrir à la connexion
