@@ -26,12 +26,13 @@ final class CoverResolver {
         }
     }
 
-    private static func candidates(for titleID: String) -> [String] {
+    static func candidates(for titleID: String) -> [String] {
         // Updates (…800) and DLC share the base game's art (…000).
         let base = String(titleID.prefix(13)) + "000"
         var ids = [titleID]
         if base != titleID { ids.append(base) }
         return ids.flatMap { id in [
+            "https://tinfoil.media/ti/\(id)/1024/1024",
             "https://tinfoil.media/ti/\(id)/512/512",
             "https://api.nlib.cc/nx/\(id)/icon/512/512",
         ] }

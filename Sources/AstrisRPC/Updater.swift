@@ -5,6 +5,8 @@ final class Updater {
     struct Release {
         let version: String
         let zipURL: URL
+        /// Cleaned-up release notes, if any.
+        let notes: String?
     }
 
     private static let latestURL =
@@ -67,7 +69,7 @@ final class Updater {
 
     // MARK: - Helpers
 
-    private static func parse(_ data: Data) -> Release? {
+    static func parse(_ data: Data) -> Release? {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let tag = json["tag_name"] as? String,
               let assets = json["assets"] as? [[String: Any]],
@@ -75,7 +77,23 @@ final class Updater {
               let link = zip["browser_download_url"] as? String,
               let url = URL(string: link)
         else { return nil }
-        return Release(version: tag.hasPrefix("v") ? String(tag.dropFirst()) : tag, zipURL: url)
+        return Release(
+            version: tag.hasPrefix("v") ? String(tag.dropFirst()) : tag,
+            zipURL: url,
+            notes: (json["body"] as? String).flatMap(releaseNotes))
+    }
+
+    /// GitHub's generated notes -> "• feat: …" lines, without authors and links.
+    static func releaseNotes(_ body: String) -> String? {
+        let lines = body.split(whereSeparator: \.isNewline).compactMap { line -> String? in
+            let text = line.trimmingCharacters(in: .whitespaces)
+            guard text.hasPrefix("* ") || text.hasPrefix("- "),
+                  !text.contains("made their first contribution") else { return nil }
+            let item = String(text.dropFirst(2))
+                .replacingOccurrences(of: #"\s+by @\S+(\s+in\s+\S+)?$"#, with: "", options: .regularExpression)
+            return "• " + item
+        }
+        return lines.isEmpty ? nil : lines.joined(separator: "\n")
     }
 
     static func isNewer(_ a: String, than b: String) -> Bool {

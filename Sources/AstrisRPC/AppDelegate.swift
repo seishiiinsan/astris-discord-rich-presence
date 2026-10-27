@@ -41,6 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private let detector = GameDetector()
     private let covers = CoverResolver()
+    private let eShop = EShopResolver()
     private let updater = Updater()
     private var availableUpdate: Updater.Release?
     private let discord = DiscordIPC(clientID: AppDelegate.clientID)
@@ -49,6 +50,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // Touched only on discordQueue.
     private var sentPresence: Presence?
     private var hasSent = false
+    private var nextConnectAttempt = Date.distantPast
+    private var connectBackoff: TimeInterval = 3
+
+    private var astris: NSRunningApplication?
 
     private var statusItem: NSStatusItem!
     private let gameItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
@@ -69,8 +74,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         signal(SIGPIPE, SIG_IGN)
         setUpMenu()
-        tick()
-        timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in self?.tick() }
+        let center = NSWorkspace.shared.notificationCenter
+        center.addObserver(self, selector: #selector(appLaunched(_:)),
+                           name: NSWorkspace.didLaunchApplicationNotification, object: nil)
+        center.addObserver(self, selector: #selector(appTerminated(_:)),
+                           name: NSWorkspace.didTerminateApplicationNotification, object: nil)
+        astris = NSWorkspace.shared.runningApplications.first(where: isAstris)
+        astrisChanged()
         checkUpdates(manual: false)
         updateTimer = Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { [weak self] _ in
             self?.checkUpdates(manual: false)
@@ -86,8 +96,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Loop
 
+    /// Polls only while Astris runs; otherwise waits for launch notifications.
+    private func astrisChanged() {
+        timer?.invalidate()
+        timer = nil
+        if astris != nil {
+            timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in self?.tick() }
+        }
+        tick()
+    }
+
+    @objc private func appLaunched(_ note: Notification) {
+        guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+        if isAstris(app) {
+            astris = app
+            astrisChanged()
+        } else if app.bundleIdentifier?.lowercased().hasPrefix("com.hnc.discord") == true {
+            // Discord is back: reconnect right away instead of waiting for the backoff.
+            discordQueue.async { [self] in
+                nextConnectAttempt = .distantPast
+                connectBackoff = 3
+            }
+            tick()
+        }
+    }
+
+    @objc private func appTerminated(_ note: Notification) {
+        guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+              app.processIdentifier == astris?.processIdentifier else { return }
+        astris = NSWorkspace.shared.runningApplications.first(where: isAstris)
+        astrisChanged()
+    }
+
     private func tick() {
-        let astris = runningAstris()
         if let astris { detector.poll(pid: astris.processIdentifier) } else { detector.reset() }
 
         var presence: Presence?
@@ -101,7 +142,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     image: game.titleID.flatMap(covers.cover(for:)) ?? Self.astrisLogo,
                     imageText: game.name,
                     buttons: [
-                        ("Voir sur l'eShop", Self.eShopURL(for: game.name)),
+                        ("Voir sur l'eShop", eShop.url(titleID: game.titleID, name: game.name)),
                         ("Astris", Self.astrisURL),
                     ])
             } else {
@@ -117,15 +158,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// "45 min", "12 h"
-    private static func formatPlayed(_ seconds: TimeInterval) -> String? {
+    static func formatPlayed(_ seconds: TimeInterval) -> String? {
         guard seconds >= 60 else { return nil }
         if seconds < 3600 { return "\(Int(seconds / 60)) min" }
         return "\(Int(seconds / 3600)) h"
-    }
-
-    private static func eShopURL(for name: String) -> String {
-        let query = name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        return "https://www.nintendo.com/fr-fr/Rechercher/Rechercher-299117.html?q=\(query)"
     }
 
     private func push(_ presence: Presence?) {
@@ -140,7 +176,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 hasSent = true
                 return
             }
-            guard discord.connect() else { return }
+            if !discord.isConnected {
+                guard Date() >= nextConnectAttempt else { return }
+                guard discord.connect() else {
+                    // Discord closed: back off 3 s → 6 → 12 … up to 60 s.
+                    nextConnectAttempt = Date().addingTimeInterval(connectBackoff)
+                    connectBackoff = min(connectBackoff * 2, 60)
+                    return
+                }
+                connectBackoff = 3
+            }
             if discord.setActivity(presence?.activity) {
                 sentPresence = presence
                 hasSent = true
@@ -150,14 +195,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func runningAstris() -> NSRunningApplication? {
-        let me = ProcessInfo.processInfo.processIdentifier
-        return NSWorkspace.shared.runningApplications.first { app in
-            guard app.processIdentifier != me else { return false }
-            let name = app.localizedName?.lowercased() ?? ""
-            let bundle = app.bundleIdentifier?.lowercased() ?? ""
-            return name == "astris" || (bundle.contains("astris") && !bundle.contains("astris-rpc"))
-        }
+    private func isAstris(_ app: NSRunningApplication) -> Bool {
+        guard app.processIdentifier != ProcessInfo.processInfo.processIdentifier, !app.isTerminated else { return false }
+        let name = app.localizedName?.lowercased() ?? ""
+        let bundle = app.bundleIdentifier?.lowercased() ?? ""
+        return name == "astris" || (bundle.contains("astris") && !bundle.contains("astris-rpc"))
     }
 
     // MARK: - Menu
@@ -200,6 +242,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             gameItem.title = "Astris : menu"
         }
         discordItem.title = discordConnected ? "Discord : connecté" : "Discord : non connecté"
+        refreshIcon(astrisRunning: astrisRunning)
         enabledItem.state = enabled ? .on : .off
         loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
     }
@@ -219,7 +262,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             NSAlert(error: error).runModal()
         }
-        refreshMenu(astrisRunning: runningAstris() != nil)
+        refreshMenu(astrisRunning: astris != nil)
+    }
+
+    /// Filled controller in game, outline otherwise, dimmed when idle, warning if Discord is unreachable.
+    private func refreshIcon(astrisRunning: Bool) {
+        let symbol: String
+        if enabled && astrisRunning && !discordConnected {
+            symbol = "exclamationmark.triangle"
+        } else if detector.game != nil && enabled {
+            symbol = "gamecontroller.fill"
+        } else {
+            symbol = "gamecontroller"
+        }
+        guard let button = statusItem.button else { return }
+        if button.image?.accessibilityDescription != symbol {
+            button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: symbol)
+        }
+        button.appearsDisabled = !enabled || !astrisRunning
     }
 
     // MARK: - Updates
@@ -249,6 +309,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let alert = NSAlert()
             if let release {
                 alert.messageText = "Version \(release.version) disponible"
+                alert.informativeText = release.notes ?? ""
                 alert.addButton(withTitle: "Mettre à jour")
                 alert.addButton(withTitle: "Plus tard")
             } else {
