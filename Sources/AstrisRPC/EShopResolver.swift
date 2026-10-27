@@ -23,11 +23,13 @@ final class EShopResolver {
 
     static func searchURL(for name: String) -> String {
         let query = name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        return "https://www.nintendo.com/fr-fr/Rechercher/Rechercher-299117.html?q=\(query)"
+        return L10n.isFrench
+            ? "https://www.nintendo.com/fr-fr/Rechercher/Rechercher-299117.html?q=\(query)"
+            : "https://www.nintendo.com/us/search/#q=\(query)"
     }
 
     static func titleURL(nsuid: String) -> String {
-        "https://ec.nintendo.com/FR/fr/titles/\(nsuid)"
+        L10n.isFrench ? "https://ec.nintendo.com/FR/fr/titles/\(nsuid)" : "https://ec.nintendo.com/US/en/titles/\(nsuid)"
     }
 
     /// Accepts "nsuId" / "nsuid" / "nsu_id" as a number or a string.

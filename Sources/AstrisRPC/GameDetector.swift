@@ -18,7 +18,7 @@ final class GameDetector {
     private static let lsofInterval: TimeInterval = 6
 
     private(set) var game: Game?
-    private var romPath: String?
+    private(set) var romPath: String?
     private var lastLsof = Date.distantPast
     private var lsofROM: String?
 

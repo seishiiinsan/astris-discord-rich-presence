@@ -91,6 +91,31 @@ final class PresenceTests: XCTestCase {
         XCTAssertEqual(EShopResolver.nsuid(in: ["nsuId": NSNumber(value: 70010000012345)]), "70010000012345")
         XCTAssertEqual(EShopResolver.nsuid(in: ["nsuid": "70010000012345"]), "70010000012345")
         XCTAssertNil(EShopResolver.nsuid(in: ["nsuId": ""]))
+        L10n.isFrench = true
         XCTAssertTrue(EShopResolver.searchURL(for: "Super Mario").hasSuffix("?q=Super%20Mario"))
+        XCTAssertTrue(EShopResolver.titleURL(nsuid: "1").contains("/FR/fr/"))
+        L10n.isFrench = false
+        XCTAssertTrue(EShopResolver.searchURL(for: "Super Mario").hasSuffix("#q=Super%20Mario"))
+        XCTAssertTrue(EShopResolver.titleURL(nsuid: "1").contains("/US/en/"))
+    }
+
+    func testL10n() {
+        L10n.isFrench = true
+        XCTAssertEqual(L10n.tr("Oui", "Yes"), "Oui")
+        L10n.isFrench = false
+        XCTAssertEqual(L10n.tr("Oui", "Yes"), "Yes")
+    }
+}
+
+final class RecentGamesTests: XCTestCase {
+    func testRecordDedupesAndLimits() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "AstrisRPCTests-\(UUID().uuidString)"))
+        let recents = RecentGames(defaults: defaults)
+        for i in 0..<7 {
+            recents.record(name: "Game \(i)", titleID: nil, romPath: "/g/\(i).xci")
+        }
+        recents.record(name: "Game 4", titleID: nil, romPath: "/g/4.xci")
+        XCTAssertEqual(recents.entries.map(\.name), ["Game 4", "Game 6", "Game 5", "Game 3", "Game 2"])
+        XCTAssertEqual(RecentGames(defaults: defaults).entries, recents.entries, "persisted")
     }
 }
