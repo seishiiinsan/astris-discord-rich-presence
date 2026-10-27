@@ -19,7 +19,7 @@ Télécharger `AstrisRPC.zip` depuis les [Releases](https://github.com/seishiiin
 xattr -dr com.apple.quarantine /Applications/AstrisRPC.app
 ```
 
-Nouvelle release : `git tag vX.Y.Z && git push origin vX.Y.Z` (CI GitHub Actions build + publie).
+Nouvelle release : Actions → Release → Run workflow (saisir la version), ou `git tag vX.Y.Z && git push origin vX.Y.Z`.
 
 ## Build
 
