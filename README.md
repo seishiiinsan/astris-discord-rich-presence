@@ -15,7 +15,7 @@ App macOS de barre de menus qui ajoute le Discord Rich Presence à [Astris](http
    ```bash
    xattr -dr com.apple.quarantine /Applications/AstrisRPC.app
    ```
-4. Menu 🎮 → « Lancer au démarrage ».
+4. Menu 🎮 → Réglages… → « Ouvrir à la connexion » et « Dossier des jeux ».
 
 Prérequis : macOS 13+, Discord desktop lancé.
 
@@ -24,10 +24,15 @@ Prérequis : macOS 13+, Discord desktop lancé.
 - Icône : manette pleine en jeu, vide sinon, grisée si Astris fermé ou désactivé, ⚠︎ si Discord fermé pendant qu'Astris tourne (infobulle = état)
 - État : jeu en cours (+ temps déjà joué), Discord connecté / ouvert — ou « Discord fermé — Ouvrir Discord », cliquable
 - Jeux récents : 5 derniers jeux (avec jaquette), un clic les ouvre dans Astris
-- Afficher sur Discord
-- Ouvrir à la connexion
+- Afficher sur Discord (raccourci)
+- Réglages… (⌘,)
 - Mettre à jour vers vX (si dispo) / Rechercher les mises à jour… / version
 - Quitter Astris RPC
+
+## Réglages
+
+- **Général** : afficher sur Discord, ouvrir à la connexion, dossier des jeux.
+- **Jeux** : liste des jeux du dossier (jaquette, recherche). Par jeu : afficher ou masquer sur Discord (liste noire → « En jeu · Sur Astris », sans nom ni jaquette) et nom affiché personnalisé. Réglages liés au nom du fichier.
 
 ## Langue
 
@@ -72,6 +77,9 @@ Sources/AstrisRPC/
   CoverResolver.swift  choix de la jaquette
   EShopResolver.swift  lien eShop du jeu
   RecentGames.swift    jeux récents (UserDefaults)
+  GameSettings.swift   préférences (dossier, liste noire, noms)
+  GameLibrary.swift    jeux du dossier
+  SettingsWindow.swift fenêtre Réglages (onglets Général, Jeux)
   L10n.swift           textes FR / EN
   DiscordIPC.swift     client IPC Discord minimal
   Updater.swift        mises à jour via GitHub Releases
