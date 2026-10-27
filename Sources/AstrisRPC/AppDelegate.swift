@@ -41,6 +41,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private let detector = GameDetector()
     private let covers = CoverResolver()
+    private let updater = Updater()
+    private var availableUpdate: Updater.Release?
     private let discord = DiscordIPC(clientID: AppDelegate.clientID)
     private let discordQueue = DispatchQueue(label: "astris-rpc.discord")
 
@@ -53,8 +55,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let discordItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let enabledItem = NSMenuItem(title: "Activer Rich Presence", action: #selector(toggleEnabled), keyEquivalent: "")
     private let loginItem = NSMenuItem(title: "Lancer au démarrage", action: #selector(toggleLogin), keyEquivalent: "")
+    private let updateItem = NSMenuItem(title: "", action: #selector(installUpdate), keyEquivalent: "")
+    private let checkItem = NSMenuItem(title: "Rechercher les mises à jour…", action: #selector(checkForUpdates), keyEquivalent: "")
     private var discordConnected = false
     private var timer: Timer?
+    private var updateTimer: Timer?
 
     private var enabled: Bool {
         get { UserDefaults.standard.object(forKey: Self.enabledKey) as? Bool ?? true }
@@ -66,6 +71,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setUpMenu()
         tick()
         timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in self?.tick() }
+        checkUpdates(manual: false)
+        updateTimer = Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { [weak self] _ in
+            self?.checkUpdates(manual: false)
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -169,6 +178,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menu.addItem(item)
         }
         menu.addItem(.separator())
+        updateItem.target = self
+        updateItem.isHidden = true
+        checkItem.target = self
+        menu.addItem(updateItem)
+        menu.addItem(checkItem)
+        let versionItem = NSMenuItem(title: "Version \(Updater.currentVersion)", action: nil, keyEquivalent: "")
+        versionItem.isEnabled = false
+        menu.addItem(versionItem)
+        menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quitter", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem.menu = menu
     }
@@ -202,5 +220,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSAlert(error: error).runModal()
         }
         refreshMenu(astrisRunning: runningAstris() != nil)
+    }
+
+    // MARK: - Updates
+
+    private func checkUpdates(manual: Bool) {
+        updater.check { [weak self] release in
+            guard let self else { return }
+            availableUpdate = release
+            if let release {
+                updateItem.title = "Mettre à jour vers v\(release.version)"
+                updateItem.isHidden = false
+            } else {
+                updateItem.isHidden = true
+            }
+            guard manual else { return }
+            let alert = NSAlert()
+            if let release {
+                alert.messageText = "Version \(release.version) disponible"
+                alert.addButton(withTitle: "Mettre à jour")
+                alert.addButton(withTitle: "Plus tard")
+            } else {
+                alert.messageText = "Astris RPC est à jour (v\(Updater.currentVersion))"
+            }
+            NSApp.activate(ignoringOtherApps: true)
+            if alert.runModal() == .alertFirstButtonReturn, release != nil { installUpdate() }
+        }
+    }
+
+    @objc private func checkForUpdates() {
+        checkUpdates(manual: true)
+    }
+
+    @objc private func installUpdate() {
+        guard let release = availableUpdate else { return }
+        updateItem.title = "Téléchargement de v\(release.version)…"
+        updateItem.isEnabled = false
+        updater.install(release) { [weak self] error in
+            guard let self else { return }
+            updateItem.title = "Mettre à jour vers v\(release.version)"
+            updateItem.isEnabled = true
+            if let error {
+                NSApp.activate(ignoringOtherApps: true)
+                NSAlert(error: error).runModal()
+            }
+        }
     }
 }
