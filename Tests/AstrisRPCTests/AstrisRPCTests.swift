@@ -165,3 +165,26 @@ final class GameLibraryTests: XCTestCase {
         XCTAssertEqual(games.map(\.titleID), ["0100EA80032EA000", "0100F2C0115B6000"])
     }
 }
+
+final class TitleMatchingTests: XCTestCase {
+    func testNormalize() {
+        XCTAssertEqual(GameDetector.normalize("Super Mario Bros.™ Wonder"), "supermariobroswonder")
+        XCTAssertEqual(GameDetector.normalize("Pokémon Legends: Arceus"), "pokemonlegendsarceus")
+    }
+
+    func testScanMatchesByTitle() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        FileManager.default.createFile(atPath: root.appendingPathComponent("Super Mario Bros. Wonder.xcz").path, contents: Data())
+
+        let games = GameLibrary.scan(root, titles: ["supermariobroswonder": "010015100B514000"])
+        XCTAssertEqual(games.first?.titleID, "010015100B514000")
+    }
+
+    func testRememberTitleID() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "AstrisRPCTests-\(UUID().uuidString)"))
+        GameSettings(defaults: defaults).rememberTitleID("0100AAA", for: "/x/Game.xci")
+        XCTAssertEqual(GameSettings(defaults: defaults).knownTitleIDs["Game.xci"], "0100AAA")
+    }
+}

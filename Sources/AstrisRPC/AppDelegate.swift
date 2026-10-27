@@ -142,6 +142,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func tick() {
         if let astris { detector.poll(pid: astris.processIdentifier) } else { detector.reset() }
+        if let titleID = detector.game?.titleID, let rom = detector.romPath {
+            settings.rememberTitleID(titleID, for: rom)
+        }
         if let game = detector.game, let rom = detector.romPath, recents.entries.first?.romPath != rom {
             recents.record(name: game.name, titleID: game.titleID, romPath: rom)
         }
