@@ -7,7 +7,7 @@ Affiche : nom du jeu, jaquette (via TitleID), temps de jeu. Hors jeu : « Dans l
 ## Fonctionnement
 
 - Détecte Astris via les apps lancées (`NSWorkspace`).
-- Lit les logs Ryujinx d'Astris et repère `Application Loaded: <Jeu> v<ver> [<TitleID>]`. Aucune permission macOS requise.
+- Repère le jeu ouvert par Astris (`lsof` : `.xci/.xcz/.nsp/.nsz/.nro`) et son TitleID via `~/Library/Application Support/Astris/games/<TitleID>/gui/metadata.json` (modifié au lancement). Aucune permission macOS requise.
 - Parle à Discord via le socket local `discord-ipc-N`.
 - Jaquette : `https://tinfoil.media/ti/<TitleID>/512/512`.
 
@@ -38,11 +38,3 @@ Puis menu 🎮 → « Lancer au démarrage ».
 - État jeu / Discord
 - Activer Rich Presence
 - Lancer au démarrage
-- Choisir dossier logs… (si détection auto échoue)
-- Ouvrir log actuel
-
-## Logs
-
-Recherche auto dans `~/Library/Application Support/*{Astris,Ryujinx}*`, `~/Library/Logs`, et `~/Library/Containers/*astris*`. Sinon, choisir le dossier à la main.
-
-Si la fin de partie n'est pas détectée (Astris reste sur le jeu après retour au menu), ouvrir le log et chercher la ligne écrite à l'arrêt, puis l'ajouter à `stopRegex` dans `Sources/AstrisRPC/LogWatcher.swift`.

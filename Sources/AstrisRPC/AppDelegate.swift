@@ -7,6 +7,8 @@ struct Presence: Equatable {
     var start: Date?
     var image: String?
     var imageText: String?
+    var smallImage: String?
+    var smallText: String?
 
     var activity: [String: Any] {
         var a: [String: Any] = ["type": 0, "details": details]
@@ -15,6 +17,8 @@ struct Presence: Equatable {
         if let image {
             var assets: [String: Any] = ["large_image": image]
             if let imageText { assets["large_text"] = imageText }
+            if let smallImage { assets["small_image"] = smallImage }
+            if let smallText { assets["small_text"] = smallText }
             a["assets"] = assets
         }
         return a
@@ -24,9 +28,10 @@ struct Presence: Equatable {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     static let clientID = "1564590186887774209"
     private static let enabledKey = "presenceEnabled"
-    private static let logDirKey = "logDirectory"
+    private static let appIcon =
+        "https://raw.githubusercontent.com/seishiiinsan/astris-discord-rich-presence/main/Resources/AppIcon.png"
 
-    private let watcher = LogWatcher()
+    private let detector = GameDetector()
     private let discord = DiscordIPC(clientID: AppDelegate.clientID)
     private let discordQueue = DispatchQueue(label: "astris-rpc.discord")
 
@@ -49,9 +54,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         signal(SIGPIPE, SIG_IGN)
-        if let path = UserDefaults.standard.string(forKey: Self.logDirKey) {
-            watcher.customDirectory = URL(fileURLWithPath: path)
-        }
         setUpMenu()
         tick()
         timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in self?.tick() }
@@ -68,19 +70,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func tick() {
         let astris = runningAstris()
-        if astris != nil { watcher.poll() } else { watcher.reset() }
+        if let astris { detector.poll(pid: astris.processIdentifier) } else { detector.reset() }
 
         var presence: Presence?
         if enabled, let astris {
-            if let game = watcher.game {
+            if let game = detector.game {
                 presence = Presence(
                     details: game.name,
                     state: "Sur Astris",
                     start: game.start,
-                    image: "https://tinfoil.media/ti/\(game.titleID)/512/512",
-                    imageText: game.name)
+                    image: game.titleID.map { "https://tinfoil.media/ti/\($0)/512/512" } ?? Self.appIcon,
+                    imageText: game.name,
+                    smallImage: game.titleID == nil ? nil : Self.appIcon,
+                    smallText: "Astris")
             } else {
-                presence = Presence(details: "Dans le menu", state: "Sur Astris", start: astris.launchDate)
+                presence = Presence(
+                    details: "Dans le menu", state: "Sur Astris", start: astris.launchDate,
+                    image: Self.appIcon, imageText: "Astris")
             }
         }
 
@@ -138,14 +144,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menu.addItem(item)
         }
         menu.addItem(.separator())
-        let pick = NSMenuItem(title: "Choisir dossier logs…", action: #selector(pickLogDir), keyEquivalent: "")
-        let auto = NSMenuItem(title: "Détection auto des logs", action: #selector(resetLogDir), keyEquivalent: "")
-        let open = NSMenuItem(title: "Ouvrir log actuel", action: #selector(openLog), keyEquivalent: "")
-        for item in [pick, auto, open] {
-            item.target = self
-            menu.addItem(item)
-        }
-        menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quitter", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem.menu = menu
     }
@@ -153,10 +151,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func refreshMenu(astrisRunning: Bool) {
         if !astrisRunning {
             gameItem.title = "Astris non lancé"
-        } else if let game = watcher.game {
+        } else if let game = detector.game {
             gameItem.title = "Jeu : \(game.name)"
         } else {
-            gameItem.title = watcher.currentLog == nil ? "Astris : logs introuvables" : "Astris : menu"
+            gameItem.title = "Astris : menu"
         }
         discordItem.title = discordConnected ? "Discord : connecté" : "Discord : non connecté"
         enabledItem.state = enabled ? .on : .off
@@ -179,31 +177,5 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSAlert(error: error).runModal()
         }
         refreshMenu(astrisRunning: runningAstris() != nil)
-    }
-
-    @objc private func pickLogDir() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.message = "Dossier contenant les fichiers .log d'Astris"
-        NSApp.activate(ignoringOtherApps: true)
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        UserDefaults.standard.set(url.path, forKey: Self.logDirKey)
-        watcher.customDirectory = url
-        watcher.reset()
-        tick()
-    }
-
-    @objc private func resetLogDir() {
-        UserDefaults.standard.removeObject(forKey: Self.logDirKey)
-        watcher.customDirectory = nil
-        watcher.reset()
-        tick()
-    }
-
-    @objc private func openLog() {
-        if let log = watcher.currentLog {
-            NSWorkspace.shared.activateFileViewerSelecting([log])
-        }
     }
 }
