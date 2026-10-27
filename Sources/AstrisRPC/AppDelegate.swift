@@ -80,9 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     state: "Sur Astris",
                     start: game.start,
                     image: game.titleID.map { "https://tinfoil.media/ti/\($0)/512/512" } ?? Self.appIcon,
-                    imageText: game.name,
-                    smallImage: game.titleID == nil ? nil : Self.appIcon,
-                    smallText: "Astris")
+                    imageText: game.name)
             } else {
                 presence = Presence(
                     details: "Dans le menu", state: "Sur Astris", start: astris.launchDate,
