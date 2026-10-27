@@ -28,8 +28,8 @@ struct Presence: Equatable {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     static let clientID = "1564590186887774209"
     private static let enabledKey = "presenceEnabled"
-    private static let appIcon =
-        "https://raw.githubusercontent.com/seishiiinsan/astris-discord-rich-presence/main/Resources/AppIcon.png"
+    /// Rich Presence art asset key, uploaded in the Discord developer portal.
+    private static let astrisLogo = "astris"
 
     private let detector = GameDetector()
     private let discord = DiscordIPC(clientID: AppDelegate.clientID)
@@ -79,12 +79,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     details: game.name,
                     state: "Sur Astris",
                     start: game.start,
-                    image: game.titleID.map { "https://tinfoil.media/ti/\($0)/512/512" } ?? Self.appIcon,
+                    image: game.titleID.map { "https://tinfoil.media/ti/\($0)/512/512" } ?? Self.astrisLogo,
                     imageText: game.name)
             } else {
                 presence = Presence(
                     details: "Dans le menu", state: "Sur Astris", start: astris.launchDate,
-                    image: Self.appIcon, imageText: "Astris")
+                    image: Self.astrisLogo, imageText: "Astris")
             }
         }
 
