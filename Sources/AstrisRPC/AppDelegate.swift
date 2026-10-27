@@ -292,9 +292,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard thumbnails[titleID] == nil, !loadingThumbnails.contains(titleID),
               let link = covers.cover(for: titleID), let url = URL(string: link) else { return }
         loadingThumbnails.insert(titleID)
-        URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
+        URLSession.shared.dataTask(with: url) { data, _, _ in
             let image = data.flatMap(NSImage.init(data:))
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 loadingThumbnails.remove(titleID)
                 guard let image else { return }
