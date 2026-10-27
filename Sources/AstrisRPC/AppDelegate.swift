@@ -28,8 +28,8 @@ struct Presence: Equatable {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     static let clientID = "1564590186887774209"
     private static let enabledKey = "presenceEnabled"
-    /// Rich Presence art asset key, uploaded in the Discord developer portal.
-    private static let astrisLogo = "astris"
+    private static let astrisLogo =
+        "https://raw.githubusercontent.com/seishiiinsan/astris-discord-rich-presence/main/Resources/AstrisLogo.png"
 
     private let detector = GameDetector()
     private let discord = DiscordIPC(clientID: AppDelegate.clientID)
