@@ -31,7 +31,7 @@ struct Presence: Equatable {
     }
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     static let clientID = "1564590186887774209"
     private static let enabledKey = "presenceEnabled"
     private static let astrisLogo =
@@ -54,12 +54,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var connectBackoff: TimeInterval = 3
 
     private var astris: NSRunningApplication?
+    private var iconSymbol: String?
 
     private var statusItem: NSStatusItem!
     private let gameItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-    private let discordItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-    private let enabledItem = NSMenuItem(title: "Activer Rich Presence", action: #selector(toggleEnabled), keyEquivalent: "")
-    private let loginItem = NSMenuItem(title: "Lancer au démarrage", action: #selector(toggleLogin), keyEquivalent: "")
+    private let discordItem = NSMenuItem(title: "", action: #selector(openDiscord), keyEquivalent: "")
+    private let enabledItem = NSMenuItem(title: "Afficher sur Discord", action: #selector(toggleEnabled), keyEquivalent: "")
+    private let loginItem = NSMenuItem(title: "Ouvrir à la connexion", action: #selector(toggleLogin), keyEquivalent: "")
     private let updateItem = NSMenuItem(title: "", action: #selector(confirmUpdate), keyEquivalent: "")
     private let checkItem = NSMenuItem(title: "Rechercher les mises à jour…", action: #selector(checkForUpdates), keyEquivalent: "")
     private var discordConnected = false
@@ -206,45 +207,109 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func setUpMenu() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.image = NSImage(systemSymbolName: "gamecontroller", accessibilityDescription: "Astris RPC")
 
         let menu = NSMenu()
         menu.autoenablesItems = false
+        menu.delegate = self
+
+        // Status: what is happening right now.
         gameItem.isEnabled = false
-        discordItem.isEnabled = false
+        discordItem.target = self
         menu.addItem(gameItem)
         menu.addItem(discordItem)
         menu.addItem(.separator())
+
+        // Settings.
+        enabledItem.image = Self.symbol("eye")
+        loginItem.image = Self.symbol("power")
         for item in [enabledItem, loginItem] {
             item.target = self
             menu.addItem(item)
         }
         menu.addItem(.separator())
+
+        // Updates.
         updateItem.target = self
         updateItem.isHidden = true
+        updateItem.image = Self.symbol("arrow.down.circle.fill", color: .controlAccentColor)
         checkItem.target = self
+        checkItem.image = Self.symbol("arrow.triangle.2.circlepath")
         menu.addItem(updateItem)
         menu.addItem(checkItem)
-        let versionItem = NSMenuItem(title: "Version \(Updater.currentVersion)", action: nil, keyEquivalent: "")
+        let versionItem = NSMenuItem(title: "Astris RPC \(Updater.currentVersion)", action: nil, keyEquivalent: "")
         versionItem.isEnabled = false
         menu.addItem(versionItem)
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem(title: "Quitter", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+
+        menu.addItem(NSMenuItem(title: "Quitter Astris RPC", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem.menu = menu
+        refreshMenu(astrisRunning: astris != nil)
+    }
+
+    /// Always show fresh state when the menu opens, even while polling is paused.
+    func menuWillOpen(_ menu: NSMenu) {
+        refreshMenu(astrisRunning: astris != nil)
     }
 
     private func refreshMenu(astrisRunning: Bool) {
         if !astrisRunning {
-            gameItem.title = "Astris non lancé"
+            gameItem.title = "Astris n'est pas ouvert"
+            gameItem.image = Self.symbol("moon.zzz")
         } else if let game = detector.game {
-            gameItem.title = "Jeu : \(game.name)"
+            gameItem.title = game.name
+            gameItem.image = Self.symbol("gamecontroller.fill", color: .systemGreen)
         } else {
-            gameItem.title = "Astris : menu"
+            gameItem.title = "Astris ouvert, aucun jeu lancé"
+            gameItem.image = Self.symbol("gamecontroller")
         }
-        discordItem.title = discordConnected ? "Discord : connecté" : "Discord : non connecté"
-        refreshIcon(astrisRunning: astrisRunning)
+        if #available(macOS 14.4, *) {
+            gameItem.subtitle = detector.game?.playedTime.flatMap(Self.formatPlayed).map { "\($0) jouées avant cette session" }
+        }
+
+        // Discord row doubles as the fix: click to open Discord when it's unreachable.
+        if discordConnected {
+            discordItem.title = "Connecté à Discord"
+            discordItem.image = Self.symbol("checkmark.circle.fill", color: .systemGreen)
+            discordItem.isEnabled = false
+        } else {
+            discordItem.title = "Discord fermé — Ouvrir Discord"
+            discordItem.image = Self.symbol("exclamationmark.triangle.fill", color: .systemOrange)
+            discordItem.isEnabled = true
+        }
+
         enabledItem.state = enabled ? .on : .off
         loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        refreshIcon(astrisRunning: astrisRunning)
+    }
+
+    private static func symbol(_ name: String, color: NSColor? = nil) -> NSImage? {
+        guard let image = NSImage(systemSymbolName: name, accessibilityDescription: nil) else { return nil }
+        guard let color else { return image }
+        return image.withSymbolConfiguration(.init(paletteColors: [color]))
+    }
+
+    /// Filled controller in game, outline otherwise, dimmed when idle, warning if Discord is unreachable.
+    private func refreshIcon(astrisRunning: Bool) {
+        let (symbol, label): (String, String) = {
+            if !enabled { return ("gamecontroller", "Astris RPC — désactivé") }
+            if astrisRunning && !discordConnected { return ("exclamationmark.triangle", "Astris RPC — Discord injoignable") }
+            if let game = detector.game { return ("gamecontroller.fill", "Astris RPC — \(game.name)") }
+            return ("gamecontroller", astrisRunning ? "Astris RPC — menu Astris" : "Astris RPC — Astris fermé")
+        }()
+        guard let button = statusItem.button else { return }
+        if symbol != iconSymbol {
+            iconSymbol = symbol
+            button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
+        }
+        button.toolTip = label
+        button.setAccessibilityLabel(label)
+        button.appearsDisabled = !enabled || !astrisRunning
+    }
+
+    @objc private func openDiscord() {
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.hnc.Discord") {
+            NSWorkspace.shared.openApplication(at: url, configuration: .init())
+        }
     }
 
     @objc private func toggleEnabled() {
@@ -263,23 +328,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSAlert(error: error).runModal()
         }
         refreshMenu(astrisRunning: astris != nil)
-    }
-
-    /// Filled controller in game, outline otherwise, dimmed when idle, warning if Discord is unreachable.
-    private func refreshIcon(astrisRunning: Bool) {
-        let symbol: String
-        if enabled && astrisRunning && !discordConnected {
-            symbol = "exclamationmark.triangle"
-        } else if detector.game != nil && enabled {
-            symbol = "gamecontroller.fill"
-        } else {
-            symbol = "gamecontroller"
-        }
-        guard let button = statusItem.button else { return }
-        if button.image?.accessibilityDescription != symbol {
-            button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: symbol)
-        }
-        button.appearsDisabled = !enabled || !astrisRunning
     }
 
     // MARK: - Updates
