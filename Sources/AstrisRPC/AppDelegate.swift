@@ -60,7 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let discordItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let enabledItem = NSMenuItem(title: "Activer Rich Presence", action: #selector(toggleEnabled), keyEquivalent: "")
     private let loginItem = NSMenuItem(title: "Lancer au démarrage", action: #selector(toggleLogin), keyEquivalent: "")
-    private let updateItem = NSMenuItem(title: "", action: #selector(installUpdate), keyEquivalent: "")
+    private let updateItem = NSMenuItem(title: "", action: #selector(confirmUpdate), keyEquivalent: "")
     private let checkItem = NSMenuItem(title: "Rechercher les mises à jour…", action: #selector(checkForUpdates), keyEquivalent: "")
     private var discordConnected = false
     private var timer: Timer?
@@ -306,25 +306,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 updateItem.isHidden = true
             }
             guard manual else { return }
-            let alert = NSAlert()
-            if let release {
-                alert.messageText = "Version \(release.version) disponible"
-                alert.informativeText = release.notes ?? ""
-                alert.addButton(withTitle: "Mettre à jour")
-                alert.addButton(withTitle: "Plus tard")
+            if release != nil {
+                confirmUpdate()
             } else {
+                let alert = NSAlert()
                 alert.messageText = "Astris RPC est à jour (v\(Updater.currentVersion))"
+                NSApp.activate(ignoringOtherApps: true)
+                alert.runModal()
             }
-            NSApp.activate(ignoringOtherApps: true)
-            if alert.runModal() == .alertFirstButtonReturn, release != nil { installUpdate() }
         }
+    }
+
+    /// Shows the release notes, then installs if confirmed.
+    @objc private func confirmUpdate() {
+        guard let release = availableUpdate else { return }
+        let alert = NSAlert()
+        alert.messageText = "Version \(release.version) disponible"
+        alert.informativeText = release.notes ?? ""
+        alert.addButton(withTitle: "Mettre à jour")
+        alert.addButton(withTitle: "Plus tard")
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn { installUpdate() }
     }
 
     @objc private func checkForUpdates() {
         checkUpdates(manual: true)
     }
 
-    @objc private func installUpdate() {
+    private func installUpdate() {
         guard let release = availableUpdate else { return }
         updateItem.title = "Téléchargement de v\(release.version)…"
         updateItem.isEnabled = false
