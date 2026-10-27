@@ -7,6 +7,8 @@ final class GameDetector {
         let name: String
         let titleID: String?
         let start: Date
+        /// Total time played before this session, from Astris' metadata.
+        let playedTime: TimeInterval?
     }
 
     private static let romExtensions: Set<String> = ["xci", "xcz", "nsp", "nsz", "nro"]
@@ -69,7 +71,8 @@ final class GameDetector {
         return Game(
             name: title ?? Self.cleanName(fileName),
             titleID: titleID?.uppercased(),
-            start: min(start, Date()))
+            start: min(start, Date()),
+            playedTime: Self.parsePlayed(metadata?["timespan_played"] ?? metadata?["time_played"]))
     }
 
     // MARK: - Metadata
@@ -137,6 +140,20 @@ final class GameDetector {
             .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespaces)
         return cleaned.isEmpty ? name : cleaned
+    }
+
+    /// .NET TimeSpan "[d.]hh:mm:ss[.fffffff]", or plain seconds.
+    private static func parsePlayed(_ value: Any?) -> TimeInterval? {
+        if let n = value as? NSNumber { return n.doubleValue }
+        guard let string = value as? String else { return nil }
+        let parts = string.split(separator: ":")
+        guard parts.count == 3 else { return Double(string) }
+        let head = parts[0].split(separator: ".")
+        let days = head.count == 2 ? Double(head[0]) ?? 0 : 0
+        let hours = Double(head.last ?? "0") ?? 0
+        let minutes = Double(parts[1]) ?? 0
+        let seconds = Double(parts[2]) ?? 0
+        return days * 86400 + hours * 3600 + minutes * 60 + seconds
     }
 
     /// Ryujinx writes e.g. "2026-10-27T10:44:12.1234567Z"; keep second precision.

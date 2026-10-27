@@ -7,8 +7,13 @@ struct Presence: Equatable {
     var start: Date?
     var image: String?
     var imageText: String?
-    var smallImage: String?
-    var smallText: String?
+    var buttons: [(label: String, url: String)] = []
+
+    static func == (a: Presence, b: Presence) -> Bool {
+        a.details == b.details && a.state == b.state && a.start == b.start
+            && a.image == b.image && a.imageText == b.imageText
+            && a.buttons.map { $0.label } == b.buttons.map { $0.label } && a.buttons.map { $0.url } == b.buttons.map { $0.url }
+    }
 
     var activity: [String: Any] {
         var a: [String: Any] = ["type": 0, "details": details]
@@ -17,9 +22,10 @@ struct Presence: Equatable {
         if let image {
             var assets: [String: Any] = ["large_image": image]
             if let imageText { assets["large_text"] = imageText }
-            if let smallImage { assets["small_image"] = smallImage }
-            if let smallText { assets["small_text"] = smallText }
             a["assets"] = assets
+        }
+        if !buttons.isEmpty {
+            a["buttons"] = buttons.prefix(2).map { ["label": $0.label, "url": $0.url] }
         }
         return a
     }
@@ -31,7 +37,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private static let astrisLogo =
         "https://raw.githubusercontent.com/seishiiinsan/astris-discord-rich-presence/main/Resources/AstrisLogo.png"
 
+    private static let astrisURL = "https://github.com/V380-Ori/Astris.Binaries"
+
     private let detector = GameDetector()
+    private let covers = CoverResolver()
     private let discord = DiscordIPC(clientID: AppDelegate.clientID)
     private let discordQueue = DispatchQueue(label: "astris-rpc.discord")
 
@@ -75,21 +84,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         var presence: Presence?
         if enabled, let astris {
             if let game = detector.game {
+                let played = game.playedTime.flatMap(Self.formatPlayed)
                 presence = Presence(
                     details: game.name,
-                    state: "Sur Astris",
+                    state: played.map { "Sur Astris · \($0) jouées" } ?? "Sur Astris",
                     start: game.start,
-                    image: game.titleID.map { "https://tinfoil.media/ti/\($0)/512/512" } ?? Self.astrisLogo,
-                    imageText: game.name)
+                    image: game.titleID.flatMap(covers.cover(for:)) ?? Self.astrisLogo,
+                    imageText: game.name,
+                    buttons: [
+                        ("Voir sur l'eShop", Self.eShopURL(for: game.name)),
+                        ("Astris", Self.astrisURL),
+                    ])
             } else {
                 presence = Presence(
                     details: "Dans le menu", state: "Sur Astris", start: astris.launchDate,
-                    image: Self.astrisLogo, imageText: "Astris")
+                    image: Self.astrisLogo, imageText: "Astris",
+                    buttons: [("Astris", Self.astrisURL)])
             }
         }
 
         push(presence)
         refreshMenu(astrisRunning: astris != nil)
+    }
+
+    /// "45 min", "12 h"
+    private static func formatPlayed(_ seconds: TimeInterval) -> String? {
+        guard seconds >= 60 else { return nil }
+        if seconds < 3600 { return "\(Int(seconds / 60)) min" }
+        return "\(Int(seconds / 3600)) h"
+    }
+
+    private static func eShopURL(for name: String) -> String {
+        let query = name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        return "https://www.nintendo.com/fr-fr/Rechercher/Rechercher-299117.html?q=\(query)"
     }
 
     private func push(_ presence: Presence?) {
