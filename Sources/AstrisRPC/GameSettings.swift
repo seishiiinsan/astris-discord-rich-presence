@@ -1,5 +1,28 @@
 import Foundation
 
+/// Where a game is in the player's backlog.
+enum PlayStatus: String, Codable, CaseIterable {
+    case backlog, playing, finished, completed
+
+    var label: String {
+        switch self {
+        case .backlog: return L10n.tr("À faire", "Backlog")
+        case .playing: return L10n.tr("En cours", "Playing")
+        case .finished: return L10n.tr("Terminé", "Finished")
+        case .completed: return "100 %"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .backlog: return "tray"
+        case .playing: return "play.circle"
+        case .finished: return "checkmark.circle"
+        case .completed: return "star.circle.fill"
+        }
+    }
+}
+
 /// User preferences shared by the menu, the presence and the Settings window.
 /// Per-game settings are keyed by ROM file name, so they survive moving the games folder.
 final class GameSettings: ObservableObject {
@@ -12,6 +35,10 @@ final class GameSettings: ObservableObject {
         var detailsTemplate: String?
         var stateTemplate: String?
         var hidePlayedTime = false
+        /// Backlog: status, 1–5 stars, free note.
+        var status: PlayStatus?
+        var rating: Int?
+        var note: String?
 
         init() {}
 
@@ -24,6 +51,9 @@ final class GameSettings: ObservableObject {
             detailsTemplate = try c.decodeIfPresent(String.self, forKey: .detailsTemplate)
             stateTemplate = try c.decodeIfPresent(String.self, forKey: .stateTemplate)
             hidePlayedTime = try c.decodeIfPresent(Bool.self, forKey: .hidePlayedTime) ?? false
+            status = try? c.decodeIfPresent(PlayStatus.self, forKey: .status)
+            rating = try c.decodeIfPresent(Int.self, forKey: .rating)
+            note = try c.decodeIfPresent(String.self, forKey: .note)
         }
     }
 
@@ -336,6 +366,19 @@ final class GameSettings: ObservableObject {
     func setCustomName(_ name: String?, for romPath: String) {
         let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines)
         update(romPath) { $0.customName = (trimmed?.isEmpty ?? true) ? nil : trimmed }
+    }
+
+    func setStatus(_ status: PlayStatus?, for romPath: String) {
+        update(romPath) { $0.status = status }
+    }
+
+    func setRating(_ rating: Int?, for romPath: String) {
+        update(romPath) { $0.rating = rating.map { min(5, max(1, $0)) } }
+    }
+
+    func setNote(_ note: String?, for romPath: String) {
+        let trimmed = note?.trimmingCharacters(in: .whitespacesAndNewlines)
+        update(romPath) { $0.note = (trimmed?.isEmpty ?? true) ? nil : trimmed }
     }
 
     /// Lines for this game: its own, else the global ones (nil: default).

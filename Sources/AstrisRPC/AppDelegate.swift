@@ -287,6 +287,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     "played": settings.hidesPlayedTime(detector.romPath) ? nil : game.playedTime.flatMap(Self.formatPlayed),
                     "version": version,
                     "mode": mode,
+                    "status": detector.romPath.flatMap { settings.prefs(for: $0).status?.label },
                     "multi": config?.multiplayer == true ? L10n.tr("Multijoueur local", "Local multiplayer") : nil,
                 ]
                 var buttons: [(label: String, url: String)] = []

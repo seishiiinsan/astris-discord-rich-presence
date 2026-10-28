@@ -3,7 +3,7 @@ import Foundation
 /// User-editable presence lines: "{game}", "Sur Astris · {played} jouées"…
 /// A " · " segment whose token has no value is dropped, so "{played}" never shows up empty.
 enum PresenceTemplate {
-    static let tokens = ["game", "played", "version", "mode", "multi"]
+    static let tokens = ["game", "played", "version", "mode", "multi", "status"]
 
     static let defaultDetails = "{game}"
     static var defaultState: String { L10n.tr("Sur Astris · {played} jouées · {multi}", "On Astris · {played} played · {multi}") }

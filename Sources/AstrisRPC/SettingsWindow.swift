@@ -253,8 +253,8 @@ struct DiscordSettingsView: View {
                 Text(L10n.tr("Texte", "Text"))
             } footer: {
                 Text(L10n.tr(
-                    "Variables : {game} nom du jeu, {played} temps déjà joué, {version} version, {mode} mode TV ou portable, {multi} « Multijoueur local » si actif dans Astris. Une partie « · » dont la variable est inconnue est retirée. Vide : texte par défaut.",
-                    "Variables: {game} game name, {played} time already played, {version} version, {mode} TV or handheld mode, {multi} “Local multiplayer” when on in Astris. A “ · ” part whose variable is unknown is left out. Empty: default text."))
+                    "Variables : {game} nom du jeu, {played} temps déjà joué, {version} version, {mode} mode TV ou portable, {multi} « Multijoueur local » si actif dans Astris, {status} statut du jeu (En cours…). Une partie « · » dont la variable est inconnue est retirée. Vide : texte par défaut.",
+                    "Variables: {game} game name, {played} time already played, {version} version, {mode} TV or handheld mode, {multi} “Local multiplayer” when on in Astris, {status} game status (Playing…). A “ · ” part whose variable is unknown is left out. Empty: default text."))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -332,12 +332,28 @@ struct GamesSettingsView: View {
     @State private var games: [GameLibrary.Game] = []
     @State private var selection: GameLibrary.Game.ID?
     @State private var search = ""
+    @State private var filter = Filter.all
+    @State private var bySize = false
+    @State private var duplicates: Set<GameLibrary.Game.ID> = []
+
+    enum Filter: Hashable {
+        case all, favorites, status(PlayStatus)
+    }
 
     private var filtered: [GameLibrary.Game] {
-        guard !search.isEmpty else { return games }
-        return games.filter {
-            settings.displayName(for: $0.url.path, detected: $0.name).localizedCaseInsensitiveContains(search)
+        var list = games.filter { game in
+            switch filter {
+            case .all: return true
+            case .favorites: return settings.isFavorite(game.url.path)
+            case .status(let status): return settings.prefs(for: game.url.path).status == status
+            }
         }
+        if !search.isEmpty {
+            list = list.filter {
+                settings.displayName(for: $0.url.path, detected: $0.name).localizedCaseInsensitiveContains(search)
+            }
+        }
+        return bySize ? list.sorted { $0.size > $1.size } : list
     }
 
     var body: some View {
@@ -387,9 +403,27 @@ struct GamesSettingsView: View {
         VStack(spacing: 0) {
             TextField(L10n.tr("Rechercher", "Search"), text: $search)
                 .textFieldStyle(.roundedBorder)
-                .padding(10)
+                .padding([.horizontal, .top], 10)
+            HStack {
+                Picker(L10n.tr("Afficher", "Show"), selection: $filter) {
+                    Text(L10n.tr("Tous", "All")).tag(Filter.all)
+                    Text(L10n.tr("Favoris", "Favorites")).tag(Filter.favorites)
+                    Divider()
+                    ForEach(PlayStatus.allCases, id: \.self) { status in
+                        Label(status.label, systemImage: status.symbol).tag(Filter.status(status))
+                    }
+                }
+                .labelsHidden()
+                Picker(L10n.tr("Tri", "Sort"), selection: $bySize) {
+                    Text(L10n.tr("Nom", "Name")).tag(false)
+                    Text(L10n.tr("Taille", "Size")).tag(true)
+                }
+                .labelsHidden()
+                .fixedSize()
+            }
+            .padding(10)
             List(filtered, selection: $selection) { game in
-                GameRow(game: game, settings: settings, covers: covers).tag(game.id)
+                GameRow(game: game, settings: settings, covers: covers, duplicate: duplicates.contains(game.id)).tag(game.id)
             }
             .listStyle(.sidebar)
             // Double-click launches; right-click for the rest.
@@ -408,11 +442,17 @@ struct GamesSettingsView: View {
                 if let path = ids.first { AstrisLauncher.open(path) }
             }
             Divider()
-            Text(L10n.tr("\(games.count) jeux · \(hiddenCount) masqués", "\(games.count) games · \(hiddenCount) hidden"))
+            Text(L10n.tr(
+                "\(games.count) jeux · \(GameLibrary.formatSize(totalSize)) · \(hiddenCount) masqués" + (duplicates.isEmpty ? "" : " · \(duplicates.count) doublons"),
+                "\(games.count) games · \(GameLibrary.formatSize(totalSize)) · \(hiddenCount) hidden" + (duplicates.isEmpty ? "" : " · \(duplicates.count) duplicates")))
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .padding(8)
         }
+    }
+
+    private var totalSize: Int64 {
+        games.reduce(0) { $0 + $1.size }
     }
 
     private var hiddenCount: Int {
@@ -441,6 +481,7 @@ struct GamesSettingsView: View {
             if let id = entry.titleID { known[(entry.romPath as NSString).lastPathComponent] = id }
         }
         games = GameLibrary.scan(folder, known: known, titles: GameDetector.metadataTitleIndex())
+        duplicates = GameLibrary.duplicates(games)
         if selection == nil || !games.contains(where: { $0.id == selection }) {
             selection = games.first?.id
         }
@@ -457,6 +498,7 @@ private struct GameRow: View {
     let game: GameLibrary.Game
     @ObservedObject var settings: GameSettings
     let covers: CoverResolver
+    var duplicate = false
 
     var body: some View {
         let hidden = settings.isHidden(game.url.path)
@@ -467,10 +509,15 @@ private struct GameRow: View {
                 Text(settings.displayName(for: game.url.path, detected: game.name))
                     .lineLimit(1)
                     .foregroundStyle(hidden ? .secondary : .primary)
-                if hidden {
-                    Text(L10n.tr("Masqué sur Discord", "Hidden on Discord"))
+                let caption = [
+                    hidden ? L10n.tr("Masqué sur Discord", "Hidden on Discord") : nil,
+                    settings.prefs(for: game.url.path).status?.label,
+                    duplicate ? L10n.tr("Doublon", "Duplicate") : nil,
+                ].compactMap { $0 }.joined(separator: " · ")
+                if !caption.isEmpty {
+                    Text(caption)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(duplicate ? .orange : .secondary)
                 }
             }
             Spacer(minLength: 0)
@@ -496,6 +543,7 @@ private struct GameDetailView: View {
     @State private var name = ""
     @State private var coverLink = ""
     @State private var details = ""
+    @State private var note = ""
     @State private var state = ""
 
     private var path: String { game.url.path }
@@ -524,7 +572,7 @@ private struct GameDetailView: View {
                     .font(.title2.weight(.semibold))
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
-                Text(game.url.lastPathComponent)
+                Text(game.url.lastPathComponent + " · " + GameLibrary.formatSize(game.size))
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -541,6 +589,36 @@ private struct GameDetailView: View {
             .padding(.horizontal, 24)
 
             Form {
+                Section {
+                    Picker(L10n.tr("Statut", "Status"), selection: Binding(
+                        get: { settings.prefs(for: path).status },
+                        set: { settings.setStatus($0, for: path) })) {
+                        Text(L10n.tr("Aucun", "None")).tag(PlayStatus?.none)
+                        ForEach(PlayStatus.allCases, id: \.self) { status in
+                            Label(status.label, systemImage: status.symbol).tag(PlayStatus?.some(status))
+                        }
+                    }
+                    LabeledContent(L10n.tr("Note", "Rating")) {
+                        HStack(spacing: 2) {
+                            ForEach(1...5, id: \.self) { star in
+                                Button {
+                                    let current = settings.prefs(for: path).rating
+                                    settings.setRating(current == star ? nil : star, for: path)
+                                } label: {
+                                    Image(systemName: (settings.prefs(for: path).rating ?? 0) >= star ? "star.fill" : "star")
+                                        .foregroundStyle(.yellow)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("\(star)")
+                            }
+                        }
+                    }
+                    TextField(L10n.tr("Mémo", "Memo"), text: $note, prompt: Text(L10n.tr("Où j'en suis, à faire…", "Where I'm at, to do…")), axis: .vertical)
+                        .lineLimit(1...4)
+                        .onChange(of: note) { settings.setNote($0, for: path) }
+                } header: {
+                    Text(L10n.tr("Suivi", "Tracking"))
+                }
                 Section {
                     Toggle(L10n.tr("Afficher sur Discord", "Show on Discord"), isOn: Binding(
                         get: { !settings.isHidden(path) },
@@ -624,6 +702,7 @@ private struct GameDetailView: View {
         .onAppear {
             name = settings.prefs(for: path).customName ?? ""
             details = settings.prefs(for: path).detailsTemplate ?? ""
+            note = settings.prefs(for: path).note ?? ""
             state = settings.prefs(for: path).stateTemplate ?? ""
             let cover = settings.prefs(for: path).customCover
             coverLink = cover.flatMap { URL(string: $0)?.isFileURL == true ? nil : $0 } ?? ""

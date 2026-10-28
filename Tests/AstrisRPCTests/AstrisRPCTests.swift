@@ -753,3 +753,43 @@ final class SettingsTransferTests: XCTestCase {
         XCTAssertThrowsError(try SettingsTransfer.decode(Data("nope".utf8)))
     }
 }
+
+final class BacklogTests: XCTestCase {
+    func testStatusRatingNotePersist() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "AstrisRPCTests-\(UUID().uuidString)"))
+        let settings = GameSettings(defaults: defaults)
+        settings.setStatus(.playing, for: "/g/Zelda.nsp")
+        settings.setRating(9, for: "/g/Zelda.nsp")
+        settings.setNote("  Temple de l'eau  ", for: "/g/Zelda.nsp")
+        let prefs = GameSettings(defaults: defaults).prefs(for: "/moved/Zelda.nsp")
+        XCTAssertEqual(prefs.status, .playing)
+        XCTAssertEqual(prefs.rating, 5, "clamped")
+        XCTAssertEqual(prefs.note, "Temple de l'eau")
+        L10n.isFrench = true
+        XCTAssertEqual(PlayStatus.completed.label, "100 %")
+    }
+
+    func testUnknownStatusDoesNotBreakPrefs() throws {
+        let data = Data(#"{"Zelda.nsp": {"hidden": true, "status": "someday"}}"#.utf8)
+        let prefs = try JSONDecoder().decode([String: GameSettings.GamePrefs].self, from: data)
+        XCTAssertEqual(prefs["Zelda.nsp"]?.hidden, true)
+        XCTAssertNil(prefs["Zelda.nsp"]?.status)
+    }
+}
+
+final class LibrarySizeTests: XCTestCase {
+    func testDuplicatesAndSize() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        FileManager.default.createFile(atPath: root.appendingPathComponent("Zelda [0100F2C0115B6000].nsp").path, contents: Data(count: 2048))
+        FileManager.default.createFile(atPath: root.appendingPathComponent("Zelda copy [0100F2C0115B6000].xci").path, contents: Data(count: 10))
+        FileManager.default.createFile(atPath: root.appendingPathComponent("Zelda update [0100F2C0115B6800].nsp").path, contents: Data(count: 10))
+        FileManager.default.createFile(atPath: root.appendingPathComponent("Mario.xci").path, contents: Data(count: 10))
+        let games = GameLibrary.scan(root)
+        XCTAssertEqual(games.first { $0.name == "Zelda" }?.size, 2048)
+        let dupes = GameLibrary.duplicates(games)
+        XCTAssertEqual(dupes.count, 2, "the update is not a duplicate")
+        XCTAssertFalse(dupes.contains { $0.hasSuffix("Mario.xci") })
+    }
+}
