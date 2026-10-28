@@ -494,3 +494,19 @@ final class PerGameTemplateTests: XCTestCase {
         XCTAssertEqual(settings.templates(for: nil).state, "Global")
     }
 }
+
+final class StreamerModeTests: XCTestCase {
+    func testStreamerModeHidesChosenParts() throws {
+        let settings = GameSettings(defaults: try XCTUnwrap(UserDefaults(suiteName: "AstrisRPCTests-\(UUID().uuidString)")))
+        XCTAssertFalse(settings.hidesPlayedTime("/g/Mario.xci"))
+        XCTAssertFalse(settings.hidesEShop)
+        settings.streamerMode = true
+        XCTAssertTrue(settings.hidesPlayedTime("/g/Mario.xci"))
+        XCTAssertTrue(settings.hidesEShop)
+        XCTAssertFalse(settings.hidesCover, "covers stay by default")
+        settings.streamerHidesPlayed = false
+        XCTAssertFalse(settings.hidesPlayedTime("/g/Mario.xci"))
+        settings.setHidePlayedTime(true, for: "/g/Mario.xci")
+        XCTAssertTrue(settings.hidesPlayedTime("/g/Mario.xci"), "per-game setting")
+    }
+}

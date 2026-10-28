@@ -37,6 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let gameItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let discordItem = NSMenuItem(title: "", action: #selector(openDiscord), keyEquivalent: "")
     private let enabledItem = NSMenuItem(title: L10n.tr("Afficher sur Discord", "Show on Discord"), action: #selector(toggleEnabled), keyEquivalent: "")
+    private let streamerItem = NSMenuItem(title: L10n.tr("Mode streamer", "Streamer Mode"), action: #selector(toggleStreamer), keyEquivalent: "")
     private let hideGameItem = NSMenuItem(title: L10n.tr("Masquer ce jeu sur Discord", "Hide This Game on Discord"), action: #selector(toggleHideGame), keyEquivalent: "")
     private let hotKeys = HotKeys()
     private let settingsItem = NSMenuItem(title: L10n.tr("Réglages…", "Settings…"), action: #selector(openSettings), keyEquivalent: ",")
@@ -211,17 +212,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 let version = game.version.map { $0.first?.isNumber == true ? "v\($0)" : $0 }
                 let values: [String: String?] = [
                     "game": name,
-                    "played": game.playedTime.flatMap(Self.formatPlayed),
+                    "played": settings.hidesPlayedTime(detector.romPath) ? nil : game.playedTime.flatMap(Self.formatPlayed),
                     "version": version,
                     "mode": mode,
                     "multi": config?.multiplayer == true ? L10n.tr("Multijoueur local", "Local multiplayer") : nil,
                 ]
                 var buttons: [(label: String, url: String)] = []
-                if settings.showEShopButton {
+                if !settings.hidesEShop {
                     buttons.append((L10n.tr("Voir sur l'eShop", "View on eShop"), eShop.url(titleID: game.titleID, name: game.name)))
                 }
                 buttons.append(settings.customButton ?? ("Astris", Self.astrisURL))
-                let cover = detector.romPath.flatMap(settings.discordCover(for:)) ?? game.titleID.flatMap(covers.cover(for:))
+                let cover = settings.hidesCover ? nil
+                    : detector.romPath.flatMap(settings.discordCover(for:)) ?? game.titleID.flatMap(covers.cover(for:))
                 let templates = settings.templates(for: detector.romPath)
                 presence = Presence(
                     details: PresenceTemplate.render(Self.template(templates.details, PresenceTemplate.defaultDetails), values: values) ?? name,
@@ -349,7 +351,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         enabledItem.image = Self.symbol("eye")
         hideGameItem.image = Self.symbol("eye.slash")
         settingsItem.image = Self.symbol("gearshape")
-        for item in [enabledItem, hideGameItem, settingsItem] {
+        streamerItem.image = Self.symbol("video")
+        for item in [enabledItem, hideGameItem, streamerItem, settingsItem] {
             item.target = self
             menu.addItem(item)
         }
@@ -480,6 +483,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         enabledItem.state = enabled ? .on : .off
+        streamerItem.state = settings.streamerMode ? .on : .off
         hideGameItem.isHidden = detector.game == nil
         hideGameItem.state = detector.romPath.map(settings.isHidden) == true ? .on : .off
         let shortcutMask: NSEvent.ModifierFlags = [.control, .option, .command]
@@ -530,6 +534,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func toggleEnabled() {
         enabled.toggle()
         Log.shared.add(enabled ? "Presence on" : "Presence off")
+        tick()
+    }
+
+    @objc private func toggleStreamer() {
+        settings.streamerMode.toggle()
+        Log.shared.add(settings.streamerMode ? "Streamer mode on" : "Streamer mode off")
         tick()
     }
 
@@ -587,6 +597,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 lines.append("Cover sources: " + CoverResolver.candidates(for: id).joined(separator: ", "))
             }
             if let rom = detector.romPath { lines.append("Hidden: \(settings.isHidden(rom))") }
+            lines.append("Streamer mode: \(settings.streamerMode)")
         } else {
             lines.append("Game: none")
         }

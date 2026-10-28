@@ -11,6 +11,7 @@ final class GameSettings: ObservableObject {
         /// Per-game presence lines, over the global ones.
         var detailsTemplate: String?
         var stateTemplate: String?
+        var hidePlayedTime = false
 
         init() {}
 
@@ -22,6 +23,7 @@ final class GameSettings: ObservableObject {
             customCover = try c.decodeIfPresent(String.self, forKey: .customCover)
             detailsTemplate = try c.decodeIfPresent(String.self, forKey: .detailsTemplate)
             stateTemplate = try c.decodeIfPresent(String.self, forKey: .stateTemplate)
+            hidePlayedTime = try c.decodeIfPresent(Bool.self, forKey: .hidePlayedTime) ?? false
         }
     }
 
@@ -44,6 +46,10 @@ final class GameSettings: ObservableObject {
     private static let favoritesKey = "favoriteGames"
     private static let hotKeysKey = "hotKeys"
     private static let importedFavoritesKey = "importedAstrisFavorites"
+    private static let streamerKey = "streamerMode"
+    private static let streamerPlayedKey = "streamerHidesPlayed"
+    private static let streamerEShopKey = "streamerHidesEShop"
+    private static let streamerCoverKey = "streamerHidesCover"
 
     private let defaults: UserDefaults
 
@@ -140,6 +146,34 @@ final class GameSettings: ObservableObject {
         didSet { defaults.set(language.rawValue, forKey: L10n.languageKey) }
     }
 
+    /// Streamer mode: hides what's chosen below, on every game, in one switch.
+    @Published var streamerMode: Bool {
+        didSet { defaults.set(streamerMode, forKey: Self.streamerKey) }
+    }
+
+    @Published var streamerHidesPlayed: Bool {
+        didSet { defaults.set(streamerHidesPlayed, forKey: Self.streamerPlayedKey) }
+    }
+
+    @Published var streamerHidesEShop: Bool {
+        didSet { defaults.set(streamerHidesEShop, forKey: Self.streamerEShopKey) }
+    }
+
+    @Published var streamerHidesCover: Bool {
+        didSet { defaults.set(streamerHidesCover, forKey: Self.streamerCoverKey) }
+    }
+
+    func hidesPlayedTime(_ romPath: String?) -> Bool {
+        (streamerMode && streamerHidesPlayed) || (romPath.map { prefs(for: $0).hidePlayedTime } ?? false)
+    }
+
+    var hidesEShop: Bool { !showEShopButton || (streamerMode && streamerHidesEShop) }
+    var hidesCover: Bool { streamerMode && streamerHidesCover }
+
+    func setHidePlayedTime(_ hide: Bool, for romPath: String) {
+        update(romPath) { $0.hidePlayedTime = hide }
+    }
+
     @Published var gamesFolder: URL? {
         didSet { defaults.set(gamesFolder?.path, forKey: Self.folderKey) }
     }
@@ -169,6 +203,10 @@ final class GameSettings: ObservableObject {
         favorites = defaults.stringArray(forKey: Self.favoritesKey) ?? []
         importedFavorites = Set(defaults.stringArray(forKey: Self.importedFavoritesKey) ?? [])
         hotKeysEnabled = defaults.object(forKey: Self.hotKeysKey) as? Bool ?? true
+        streamerMode = defaults.bool(forKey: Self.streamerKey)
+        streamerHidesPlayed = defaults.object(forKey: Self.streamerPlayedKey) as? Bool ?? true
+        streamerHidesEShop = defaults.object(forKey: Self.streamerEShopKey) as? Bool ?? true
+        streamerHidesCover = defaults.object(forKey: Self.streamerCoverKey) as? Bool ?? false
         language = L10n.Language(rawValue: defaults.string(forKey: L10n.languageKey) ?? "") ?? .system
         prefs = defaults.data(forKey: Self.prefsKey)
             .flatMap { try? JSONDecoder().decode([String: GamePrefs].self, from: $0) } ?? [:]

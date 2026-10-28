@@ -227,6 +227,23 @@ struct DiscordSettingsView: View {
             }
 
             Section {
+                Toggle(L10n.tr("Mode streamer", "Streamer mode"), isOn: $settings.streamerMode)
+                Group {
+                    Toggle(L10n.tr("Cacher le temps joué", "Hide play time"), isOn: $settings.streamerHidesPlayed)
+                    Toggle(L10n.tr("Cacher le bouton eShop", "Hide the eShop button"), isOn: $settings.streamerHidesEShop)
+                    Toggle(L10n.tr("Cacher les jaquettes", "Hide covers"), isOn: $settings.streamerHidesCover)
+                }
+                .disabled(!settings.streamerMode)
+                .padding(.leading, 16)
+            } footer: {
+                Text(L10n.tr(
+                    "Aussi dans le menu. Pour cacher un jeu entier : onglet Jeux.",
+                    "Also in the menu. To hide a whole game: Games tab."))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Section {
                 Toggle(L10n.tr("Bouton « Voir sur l'eShop »", "“View on eShop” button"), isOn: $settings.showEShopButton)
                 TextField(L10n.tr("Libellé", "Label"), text: optional(\.customButtonLabel), prompt: Text("Astris"))
                 TextField("URL", text: optional(\.customButtonURL), prompt: Text("https://…"))
@@ -480,6 +497,10 @@ private struct GameDetailView: View {
                     Toggle(L10n.tr("Afficher sur Discord", "Show on Discord"), isOn: Binding(
                         get: { !settings.isHidden(path) },
                         set: { settings.setHidden(!$0, for: path) }))
+                    Toggle(L10n.tr("Cacher le temps joué", "Hide play time"), isOn: Binding(
+                        get: { settings.prefs(for: path).hidePlayedTime },
+                        set: { settings.setHidePlayedTime($0, for: path) }))
+                        .disabled(settings.isHidden(path))
                 } footer: {
                     Text(settings.isHidden(path)
                          ? L10n.tr("Discord affichera seulement « En jeu · Sur Astris », sans nom ni jaquette.",
