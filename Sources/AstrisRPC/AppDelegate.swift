@@ -15,6 +15,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let idle = IdleMonitor()
     private let history = PlayHistory()
     private var astrisConfig: AstrisConfig?
+    private let notifier = Notifier()
+    private var summaryTimer: Timer?
+    /// Touched only on discordQueue: notify once per lost connection.
+    private var notifiedDiscordLost = false
+    private var notifiedUpdate: String?
     private var astrisConfigDate = Date.distantPast
     private var isIdle = false
     private var thumbnails: [String: NSImage] = [:]
@@ -97,6 +102,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateTimer = Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { [weak self] _ in
             self?.checkUpdates(manual: false)
         }
+        notifier.requestAuthorization()
+        summaryTimer = Timer.scheduledTimer(withTimeInterval: 30 * 60, repeats: true) { [weak self] _ in
+            self?.sendWeeklySummaryIfDue()
+        }
+        sendWeeklySummaryIfDue()
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
@@ -347,6 +357,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 }
                 connectBackoff = 3
                 Log.shared.add("Connected to Discord")
+                notifiedDiscordLost = false
                 DispatchQueue.main.async { self.discordError = nil }
             }
             switch discord.setActivity(presence?.activity) {
@@ -363,6 +374,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             case .failed:
                 Log.shared.add("Discord connection lost")
                 hasSent = false
+                if presence != nil, !notifiedDiscordLost {
+                    notifiedDiscordLost = true
+                    DispatchQueue.main.async { self.notifyDiscordLost() }
+                }
             }
         }
     }
@@ -619,6 +634,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settingsWindow?.show()
     }
 
+    // MARK: - Notifications
+
+    private func notifyDiscordLost() {
+        guard settings.notifyDiscordLost else { return }
+        notifier.send(
+            id: "discord-lost",
+            title: L10n.tr("Discord déconnecté", "Discord disconnected"),
+            body: L10n.tr("Ton jeu n'est plus affiché. Nouvel essai automatique dès que Discord revient.",
+                          "Your game is no longer shown. It retries as soon as Discord is back."))
+    }
+
+    private func sendWeeklySummaryIfDue() {
+        guard settings.notifyWeeklySummary, notifier.isSummaryDue() else { return }
+        notifier.markSummarySent()
+        let rows = history.totals(recentSince: PlayHistory.startOfWeek())
+        guard let body = Notifier.weeklySummary(rows, name: { self.settings.displayName(for: $0.rom, detected: $0.name) }) else { return }
+        notifier.send(id: "weekly-summary", title: L10n.tr("Ta semaine sur Astris", "Your week on Astris"), body: body)
+        Log.shared.add("Weekly summary sent")
+    }
+
     // MARK: - Diagnostic
 
     @objc private func copyDiagnostic() {
@@ -685,6 +720,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             let release = try? result.get()
             availableUpdate = release
+            if let release, !manual, settings.notifyUpdates, notifiedUpdate != release.version {
+                notifiedUpdate = release.version
+                notifier.send(
+                    id: "update-\(release.version)",
+                    title: L10n.tr("Astris RPC \(release.version) disponible", "Astris RPC \(release.version) available"),
+                    body: L10n.tr("Menu → Mettre à jour.", "Menu → Update."))
+            }
             if let release {
                 updateItem.title = L10n.tr("Mettre à jour vers v\(release.version)", "Update to v\(release.version)")
                 updateItem.isHidden = false

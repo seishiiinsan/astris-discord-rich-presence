@@ -47,6 +47,9 @@ final class GameSettings: ObservableObject {
     private static let hotKeysKey = "hotKeys"
     private static let importedFavoritesKey = "importedAstrisFavorites"
     private static let streamerKey = "streamerMode"
+    private static let notifyDiscordKey = "notifyDiscordLost"
+    private static let notifyUpdatesKey = "notifyUpdates"
+    private static let notifySummaryKey = "notifyWeeklySummary"
     private static let streamerPlayedKey = "streamerHidesPlayed"
     private static let streamerEShopKey = "streamerHidesEShop"
     private static let streamerCoverKey = "streamerHidesCover"
@@ -146,6 +149,18 @@ final class GameSettings: ObservableObject {
         didSet { defaults.set(language.rawValue, forKey: L10n.languageKey) }
     }
 
+    @Published var notifyDiscordLost: Bool {
+        didSet { defaults.set(notifyDiscordLost, forKey: Self.notifyDiscordKey) }
+    }
+
+    @Published var notifyUpdates: Bool {
+        didSet { defaults.set(notifyUpdates, forKey: Self.notifyUpdatesKey) }
+    }
+
+    @Published var notifyWeeklySummary: Bool {
+        didSet { defaults.set(notifyWeeklySummary, forKey: Self.notifySummaryKey) }
+    }
+
     /// Streamer mode: hides what's chosen below, on every game, in one switch.
     @Published var streamerMode: Bool {
         didSet { defaults.set(streamerMode, forKey: Self.streamerKey) }
@@ -204,6 +219,9 @@ final class GameSettings: ObservableObject {
         importedFavorites = Set(defaults.stringArray(forKey: Self.importedFavoritesKey) ?? [])
         hotKeysEnabled = defaults.object(forKey: Self.hotKeysKey) as? Bool ?? true
         streamerMode = defaults.bool(forKey: Self.streamerKey)
+        notifyDiscordLost = defaults.object(forKey: Self.notifyDiscordKey) as? Bool ?? true
+        notifyUpdates = defaults.object(forKey: Self.notifyUpdatesKey) as? Bool ?? true
+        notifyWeeklySummary = defaults.object(forKey: Self.notifySummaryKey) as? Bool ?? true
         streamerHidesPlayed = defaults.object(forKey: Self.streamerPlayedKey) as? Bool ?? true
         streamerHidesEShop = defaults.object(forKey: Self.streamerEShopKey) as? Bool ?? true
         streamerHidesCover = defaults.object(forKey: Self.streamerCoverKey) as? Bool ?? false

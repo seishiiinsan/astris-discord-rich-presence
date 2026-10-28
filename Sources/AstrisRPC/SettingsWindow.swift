@@ -170,6 +170,14 @@ struct GeneralSettingsView: View {
             }
 
             Section {
+                Toggle(L10n.tr("Discord déconnecté en jeu", "Discord disconnected while playing"), isOn: $settings.notifyDiscordLost)
+                Toggle(L10n.tr("Mise à jour disponible", "Update available"), isOn: $settings.notifyUpdates)
+                Toggle(L10n.tr("Bilan de la semaine (dimanche soir)", "Weekly summary (Sunday evening)"), isOn: $settings.notifyWeeklySummary)
+            } header: {
+                Text("Notifications")
+            }
+
+            Section {
                 Toggle(L10n.tr("Enregistrer un journal", "Keep a log file"), isOn: $settings.writeLog)
                 HStack {
                     Button(L10n.tr("Afficher le journal", "Show Log")) {

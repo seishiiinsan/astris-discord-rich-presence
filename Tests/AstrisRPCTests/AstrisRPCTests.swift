@@ -537,3 +537,40 @@ final class URLCommandTests: XCTestCase {
         XCTAssertNil(URLCommand.match("Kirby", in: games))
     }
 }
+
+final class NotifierTests: XCTestCase {
+    private func calendar() -> Calendar {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "UTC")!
+        c.firstWeekday = 2
+        return c
+    }
+
+    func testSummaryDueSundayEveningOncePerWeek() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "AstrisRPCTests-\(UUID().uuidString)"))
+        let notifier = Notifier(defaults: defaults)
+        let cal = calendar()
+        let sundayEvening = try XCTUnwrap(cal.date(from: DateComponents(year: 2026, month: 11, day: 1, hour: 20)))
+        let sundayNoon = try XCTUnwrap(cal.date(from: DateComponents(year: 2026, month: 11, day: 1, hour: 12)))
+        let monday = try XCTUnwrap(cal.date(from: DateComponents(year: 2026, month: 11, day: 2, hour: 20)))
+        XCTAssertFalse(notifier.isSummaryDue(now: sundayNoon, calendar: cal))
+        XCTAssertFalse(notifier.isSummaryDue(now: monday, calendar: cal))
+        XCTAssertTrue(notifier.isSummaryDue(now: sundayEvening, calendar: cal))
+        notifier.markSummarySent(now: sundayEvening, calendar: cal)
+        XCTAssertFalse(notifier.isSummaryDue(now: sundayEvening.addingTimeInterval(3600), calendar: cal))
+        XCTAssertTrue(notifier.isSummaryDue(now: sundayEvening.addingTimeInterval(7 * 86400), calendar: cal))
+    }
+
+    func testWeeklySummaryText() {
+        L10n.isFrench = true
+        let now = Date()
+        let rows = [
+            PlayHistory.GameTotal(rom: "z.nsp", name: "Zelda", titleID: nil, total: 99999, recent: 5 * 3600 + 600, lastPlayed: now),
+            PlayHistory.GameTotal(rom: "m.xci", name: "Mario", titleID: nil, total: 9999, recent: 3 * 3600, lastPlayed: now),
+            PlayHistory.GameTotal(rom: "k.xci", name: "Kirby", titleID: nil, total: 30, recent: 30, lastPlayed: now),
+        ]
+        XCTAssertEqual(Notifier.weeklySummary(rows, name: \.name), "8 h 10 cette semaine sur 2 jeux, surtout Zelda (5 h 10).")
+        XCTAssertEqual(Notifier.weeklySummary(Array(rows.suffix(2)), name: \.name), "3 h 00 cette semaine, sur Mario.")
+        XCTAssertNil(Notifier.weeklySummary([rows[2]], name: \.name))
+    }
+}
