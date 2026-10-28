@@ -284,21 +284,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    /// Downloads the cover once and keeps a menu-sized copy for next time the menu opens.
+    /// Loads the cover (from the disk cache when possible) and keeps a menu-sized copy.
     private func loadThumbnail(_ titleID: String) {
         guard thumbnails[titleID] == nil, !loadingThumbnails.contains(titleID),
-              let link = covers.cover(for: titleID), let url = URL(string: link) else { return }
+              let link = covers.cover(for: titleID) else { return }
         loadingThumbnails.insert(titleID)
-        URLSession.shared.dataTask(with: url) { data, _, _ in
-            let image = data.flatMap(NSImage.init(data:))
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                loadingThumbnails.remove(titleID)
-                guard let image else { return }
-                image.size = NSSize(width: 20, height: 20)
-                thumbnails[titleID] = image
-            }
-        }.resume()
+        ImageCache.shared.image(for: link) { [weak self] image in
+            guard let self else { return }
+            loadingThumbnails.remove(titleID)
+            guard let thumb = image?.copy() as? NSImage else { return }
+            thumb.size = NSSize(width: 20, height: 20)
+            thumbnails[titleID] = thumb
+        }
     }
 
     @objc private func openRecent(_ sender: NSMenuItem) {

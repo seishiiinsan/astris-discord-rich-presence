@@ -215,3 +215,34 @@ final class PresenceLimitsTests: XCTestCase {
         XCTAssertEqual(DiscordIPC.reply(from: error), .rejected("child \"activity\" fails (4000)"))
     }
 }
+
+final class DiskCacheTests: XCTestCase {
+    func testStorePersistsAndExpires() {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let now = Date()
+        let store = DiskStore(file: file)
+        XCTAssertFalse(store.lookup("A").hit)
+        store.set("https://x/a.png", for: "A", now: now)
+        store.set(nil, for: "B", now: now)
+
+        let reloaded = DiskStore(file: file)
+        XCTAssertEqual(reloaded.lookup("A", now: now).value, "https://x/a.png")
+        XCTAssertTrue(reloaded.lookup("B", now: now).hit, "a known miss is a hit")
+        XCTAssertNil(reloaded.lookup("B", now: now).value)
+        XCTAssertFalse(reloaded.lookup("B", now: now.addingTimeInterval(DiskStore.missingLifetime + 1)).hit, "misses expire first")
+        XCTAssertTrue(reloaded.lookup("A", now: now.addingTimeInterval(DiskStore.missingLifetime + 1)).hit)
+    }
+
+    func testCoverResolverUsesStore() {
+        let store = DiskStore(file: nil)
+        store.set("https://x/cover.png", for: "0100EA80032EA000")
+        XCTAssertEqual(CoverResolver(store: store).cover(for: "0100EA80032EA000"), "https://x/cover.png")
+    }
+
+    func testImageFileNameIsStable() {
+        XCTAssertEqual(ImageCache.fileName(for: "a"), ImageCache.fileName(for: "a"))
+        XCTAssertNotEqual(ImageCache.fileName(for: "a"), ImageCache.fileName(for: "b"))
+        XCTAssertEqual(ImageCache.fileName(for: "a").count, 64)
+    }
+}

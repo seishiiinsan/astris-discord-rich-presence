@@ -2,9 +2,19 @@ import Foundation
 
 /// Finds the eShop page of a game from its TitleID (via its NSUID on api.nlib.cc).
 /// Falls back to a Nintendo search link until (or unless) the lookup succeeds.
+/// Found links are kept on disk (`store`), per language.
 final class EShopResolver {
     private var cache: [String: String?] = [:]
     private let lock = NSLock()
+    private let store: DiskStore?
+
+    init(store: DiskStore? = DiskStore(name: "eshop")) {
+        self.store = store
+    }
+
+    private static func storeKey(_ titleID: String) -> String {
+        (L10n.isFrench ? "fr-" : "en-") + titleID
+    }
     private let session: URLSession = {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 8
@@ -16,6 +26,10 @@ final class EShopResolver {
         lock.lock()
         defer { lock.unlock() }
         if let cached = cache[titleID] { return cached ?? Self.searchURL(for: name) }
+        if let stored = store?.lookup(Self.storeKey(titleID)), stored.hit {
+            cache[titleID] = .some(stored.value)
+            return stored.value ?? Self.searchURL(for: name)
+        }
         cache[titleID] = .some(nil)
         lookup(titleID)
         return Self.searchURL(for: name)
@@ -43,16 +57,23 @@ final class EShopResolver {
 
     private func lookup(_ titleID: String) {
         guard let url = URL(string: "https://api.nlib.cc/nx/\(titleID)") else { return }
-        session.dataTask(with: url) { [weak self] data, response, _ in
-            guard let self,
-                  (response as? HTTPURLResponse)?.statusCode == 200,
+        session.dataTask(with: url) { [weak self] data, response, error in
+            guard let self else { return }
+            let status = (response as? HTTPURLResponse)?.statusCode
+            guard status == 200,
                   let data,
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let nsuid = Self.nsuid(in: json)
-            else { return }
+            else {
+                // Only a definite answer is worth remembering, not a network error.
+                if error == nil, status == 200 || status == 404 { store?.set(nil, for: Self.storeKey(titleID)) }
+                return
+            }
+            let link = Self.titleURL(nsuid: nsuid)
             lock.lock()
-            cache[titleID] = .some(Self.titleURL(nsuid: nsuid))
+            cache[titleID] = .some(link)
             lock.unlock()
+            store?.set(link, for: Self.storeKey(titleID))
         }.resume()
     }
 }

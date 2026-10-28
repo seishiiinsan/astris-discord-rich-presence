@@ -353,7 +353,7 @@ private struct CoverView: View {
     let titleID: String?
     let covers: CoverResolver
     let size: CGFloat
-    @State private var url: URL?
+    @State private var image: NSImage?
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: size * 0.18, style: .continuous)
@@ -362,12 +362,8 @@ private struct CoverView: View {
             Image(systemName: "gamecontroller")
                 .font(.system(size: size * 0.4))
                 .foregroundStyle(.secondary)
-            if let url {
-                AsyncImage(url: url) { phase in
-                    if let image = phase.image {
-                        image.resizable().scaledToFill()
-                    }
-                }
+            if let image {
+                Image(nsImage: image).resizable().scaledToFill()
             }
         }
         .frame(width: size, height: size)
@@ -381,7 +377,9 @@ private struct CoverView: View {
         guard let titleID else { return }
         for _ in 0..<20 {
             if let link = covers.cover(for: titleID) {
-                url = URL(string: link)
+                image = await withCheckedContinuation { done in
+                    ImageCache.shared.image(for: link) { done.resume(returning: $0) }
+                }
                 return
             }
             try? await Task.sleep(nanoseconds: 300_000_000)
