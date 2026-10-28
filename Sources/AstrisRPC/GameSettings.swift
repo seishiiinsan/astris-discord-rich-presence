@@ -50,6 +50,11 @@ final class GameSettings: ObservableObject {
     private static let menuBarTimerKey = "menuBarTimer"
     private static let breakKey = "breakReminderMinutes"
     private static let lowBatteryKey = "notifyLowBattery"
+    private static let autoBackupKey = "autoBackup"
+    private static let screenshotNotifyKey = "notifyScreenshots"
+    private static let screenshotCopyKey = "copyScreenshots"
+
+    enum AutoBackup: String, CaseIterable { case off, gameClosed, weekly }
     private static let milestonesKey = "notifyMilestones"
     private static let milestonesSentKey = "milestonesSent"
     private static let steamGridDBKeyKey = "steamGridDBKey"
@@ -182,6 +187,19 @@ final class GameSettings: ObservableObject {
         didSet { defaults.set(breakReminderMinutes, forKey: Self.breakKey) }
     }
 
+    @Published var autoBackup: AutoBackup {
+        didSet { defaults.set(autoBackup.rawValue, forKey: Self.autoBackupKey) }
+    }
+
+    @Published var notifyScreenshots: Bool {
+        didSet { defaults.set(notifyScreenshots, forKey: Self.screenshotNotifyKey) }
+    }
+
+    /// Put each new screenshot on the clipboard.
+    @Published var copyScreenshots: Bool {
+        didSet { defaults.set(copyScreenshots, forKey: Self.screenshotCopyKey) }
+    }
+
     @Published var notifyLowBattery: Bool {
         didSet { defaults.set(notifyLowBattery, forKey: Self.lowBatteryKey) }
     }
@@ -272,6 +290,9 @@ final class GameSettings: ObservableObject {
         breakReminderMinutes = defaults.object(forKey: Self.breakKey) as? Int ?? 0
         notifyMilestones = defaults.object(forKey: Self.milestonesKey) as? Bool ?? true
         notifyLowBattery = defaults.object(forKey: Self.lowBatteryKey) as? Bool ?? true
+        autoBackup = AutoBackup(rawValue: defaults.string(forKey: Self.autoBackupKey) ?? "") ?? .weekly
+        notifyScreenshots = defaults.object(forKey: Self.screenshotNotifyKey) as? Bool ?? true
+        copyScreenshots = defaults.bool(forKey: Self.screenshotCopyKey)
         steamGridDBKey = defaults.string(forKey: Self.steamGridDBKeyKey)
         preferSteamGridDB = defaults.bool(forKey: Self.preferSteamGridDBKey)
         notifyDiscordLost = defaults.object(forKey: Self.notifyDiscordKey) as? Bool ?? true

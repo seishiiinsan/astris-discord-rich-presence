@@ -76,8 +76,12 @@ final class PlayHistory: ObservableObject {
         return String(format: "%d:%02d", minutes / 60, minutes % 60)
     }
 
+    /// Off right before an import, so quitting doesn't overwrite the imported history.
+    var savingEnabled = true
+
     func save() {
         lastSave = Date()
+        guard savingEnabled else { return }
         guard let file else { return }
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601

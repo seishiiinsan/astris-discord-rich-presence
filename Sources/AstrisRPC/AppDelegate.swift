@@ -48,6 +48,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let settingsItem = NSMenuItem(title: L10n.tr("Réglages…", "Settings…"), action: #selector(openSettings), keyEquivalent: ",")
     private let updateItem = NSMenuItem(title: "", action: #selector(confirmUpdate), keyEquivalent: "")
     private let recentsItem = NSMenuItem(title: L10n.tr("Jeux récents", "Recent Games"), action: nil, keyEquivalent: "")
+    private let screenshotItem = NSMenuItem(title: L10n.tr("Dernière capture", "Latest Screenshot"), action: nil, keyEquivalent: "")
+    private var lastScreenshot: (url: URL, date: Date)?
+    private var lastPlayedRom: String?
+    private var backingUp = false
     private let controllersItem = NSMenuItem(title: L10n.tr("Manettes", "Controllers"), action: nil, keyEquivalent: "")
     /// Controllers already reported as low, until they charge again.
     private var lowBatteryNotified: Set<String> = []
@@ -108,8 +112,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         notifier.requestAuthorization()
         summaryTimer = Timer.scheduledTimer(withTimeInterval: 30 * 60, repeats: true) { [weak self] _ in
             self?.sendWeeklySummaryIfDue()
+            self?.backUpWeeklyIfDue()
         }
         sendWeeklySummaryIfDue()
+        backUpWeeklyIfDue()
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
@@ -318,6 +324,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         history.update(name: played?.name, titleID: played?.titleID, romPath: played == nil ? nil : detector.romPath)
         checkReminders()
         checkControllerBatteries()
+        if astris != nil { checkScreenshots() }
+        let rom = detector.romPath
+        if lastPlayedRom != nil, rom != lastPlayedRom, settings.autoBackup == .gameClosed { backUpSaves(reason: "game closed") }
+        lastPlayedRom = rom
         if isIdle, presence != nil {
             // Paused: no running clock.
             presence?.state = L10n.tr("En pause · Sur Astris", "Idle · On Astris")
@@ -420,6 +430,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         favoritesItem.submenu = NSMenu()
         favoritesItem.isHidden = settings.favorites.isEmpty
         menu.addItem(favoritesItem)
+        screenshotItem.image = Self.symbol("camera")
+        screenshotItem.submenu = NSMenu()
+        menu.addItem(screenshotItem)
         controllersItem.image = Self.symbol("gamecontroller")
         controllersItem.submenu = NSMenu()
         menu.addItem(controllersItem)
@@ -462,6 +475,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         refreshMenu(astrisRunning: astris != nil)
         refreshRecents()
         refreshControllers()
+        refreshScreenshotItem()
     }
 
     // MARK: - Recent games
@@ -649,6 +663,85 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     // MARK: - Notifications
+
+    // MARK: - Screenshots and saves
+
+    private var screenshotsChecked = false
+
+    private func checkScreenshots() {
+        let found = AstrisFiles.latestScreenshot()
+        // The first look only sets the baseline: older screenshots aren't news.
+        guard screenshotsChecked else {
+            screenshotsChecked = true
+            lastScreenshot = found
+            return
+        }
+        guard let latest = found, latest.date > (lastScreenshot?.date ?? .distantPast) else { return }
+        lastScreenshot = latest
+        Log.shared.add("Screenshot: \(latest.url.lastPathComponent)")
+        if settings.copyScreenshots { copyImage(latest.url) }
+        if settings.notifyScreenshots {
+            notifier.send(id: "screenshot", title: L10n.tr("Capture enregistrée", "Screenshot saved"),
+                          body: settings.copyScreenshots ? L10n.tr("Copiée dans le presse-papiers.", "Copied to the clipboard.") : latest.url.lastPathComponent)
+        }
+    }
+
+    private func refreshScreenshotItem() {
+        let submenu = screenshotItem.submenu ?? NSMenu()
+        submenu.removeAllItems()
+        guard let shot = AstrisFiles.latestScreenshot() else {
+            screenshotItem.isHidden = true
+            return
+        }
+        screenshotItem.isHidden = false
+        let date = NSMenuItem(title: shot.date.formatted(date: .abbreviated, time: .shortened), action: nil, keyEquivalent: "")
+        date.isEnabled = false
+        submenu.addItem(date)
+        let copy = NSMenuItem(title: L10n.tr("Copier", "Copy"), action: #selector(copyLatestScreenshot), keyEquivalent: "")
+        let show = NSMenuItem(title: L10n.tr("Afficher dans le Finder", "Show in Finder"), action: #selector(showLatestScreenshot), keyEquivalent: "")
+        for item in [copy, show] {
+            item.target = self
+            submenu.addItem(item)
+        }
+    }
+
+    @objc private func copyLatestScreenshot() {
+        if let shot = AstrisFiles.latestScreenshot() { copyImage(shot.url) }
+    }
+
+    @objc private func showLatestScreenshot() {
+        if let shot = AstrisFiles.latestScreenshot() { NSWorkspace.shared.activateFileViewerSelecting([shot.url]) }
+    }
+
+    private func copyImage(_ url: URL) {
+        guard let image = NSImage(contentsOf: url) else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.writeObjects([image])
+    }
+
+    private func backUpWeeklyIfDue() {
+        guard settings.autoBackup == .weekly, detector.game == nil, AstrisFiles.saveDirectory != nil else { return }
+        let last = AstrisFiles.backups().first
+            .flatMap { (try? $0.resourceValues(forKeys: [.creationDateKey]))?.creationDate } ?? .distantPast
+        if Date().timeIntervalSince(last) >= 7 * 86400 { backUpSaves(reason: "weekly") }
+    }
+
+    /// In the background; one at a time.
+    private func backUpSaves(reason: String) {
+        guard !backingUp, AstrisFiles.saveDirectory != nil else { return }
+        backingUp = true
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let result = Result { try AstrisFiles.backUpSaves() }
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.backingUp = false
+                switch result {
+                case .success(let archive): Log.shared.add("Saves backed up (\(reason)): \(archive.lastPathComponent)")
+                case .failure(let error): Log.shared.add("Save backup failed: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
 
     private func refreshControllers() {
         let pads = Controllers.current()

@@ -691,3 +691,65 @@ final class ControllersTests: XCTestCase {
         XCTAssertEqual(Controllers.label(Controllers.Info(name: "Joy-Con", battery: nil, charging: false)), "Joy-Con")
     }
 }
+
+final class AstrisFilesTests: XCTestCase {
+    private func tempDir() throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    func testLatestScreenshot() throws {
+        let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let old = dir.appendingPathComponent("a.png"), new = dir.appendingPathComponent("b.jpg")
+        FileManager.default.createFile(atPath: old.path, contents: Data([1]))
+        FileManager.default.createFile(atPath: new.path, contents: Data([1]))
+        FileManager.default.createFile(atPath: dir.appendingPathComponent("notes.txt").path, contents: Data([1]))
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1)], ofItemAtPath: old.path)
+        XCTAssertEqual(AstrisFiles.latestScreenshot(in: [dir, dir.appendingPathComponent("missing")])?.url.lastPathComponent, "b.jpg")
+    }
+
+    func testBackupAndRestore() throws {
+        let root = try tempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let saves = root.appendingPathComponent("user/save")
+        try FileManager.default.createDirectory(at: saves.appendingPathComponent("0000000000000001"), withIntermediateDirectories: true)
+        try Data("v1".utf8).write(to: saves.appendingPathComponent("0000000000000001/data"))
+        let backups = root.appendingPathComponent("backups")
+
+        let archive = try AstrisFiles.backUpSaves(from: saves, to: backups, at: Date(timeIntervalSince1970: 1_800_000_000))
+        XCTAssertEqual(AstrisFiles.backups(in: backups), [archive])
+        try Data("v2".utf8).write(to: saves.appendingPathComponent("0000000000000001/data"))
+
+        try AstrisFiles.restore(archive, into: saves)
+        XCTAssertEqual(try String(contentsOf: saves.appendingPathComponent("0000000000000001/data")), "v1")
+        let aside = try FileManager.default.contentsOfDirectory(atPath: root.appendingPathComponent("user").path)
+        XCTAssertTrue(aside.contains { $0.hasPrefix("save before restore") }, "current saves kept")
+    }
+
+    func testBackupPruning() throws {
+        let root = try tempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let saves = root.appendingPathComponent("save")
+        try FileManager.default.createDirectory(at: saves, withIntermediateDirectories: true)
+        let backups = root.appendingPathComponent("backups")
+        for i in 0..<(AstrisFiles.keptBackups + 2) {
+            try AstrisFiles.backUpSaves(from: saves, to: backups, at: Date(timeIntervalSince1970: 1_800_000_000 + Double(i)))
+        }
+        XCTAssertEqual(AstrisFiles.backups(in: backups).count, AstrisFiles.keptBackups)
+    }
+}
+
+final class SettingsTransferTests: XCTestCase {
+    func testRoundTrip() throws {
+        let prefs = try JSONEncoder().encode(["Mario.xci": GameSettings.GamePrefs()])
+        let data = try SettingsTransfer.encode(.init(defaults: ["idleMinutes": 5, "gamePrefs": prefs, "favoriteGames": ["/g/a.nsp"]], history: Data("[]".utf8)))
+        let archive = try SettingsTransfer.decode(data)
+        XCTAssertEqual(archive.defaults["idleMinutes"] as? Int, 5)
+        XCTAssertEqual(archive.defaults["gamePrefs"] as? Data, prefs)
+        XCTAssertEqual(archive.defaults["favoriteGames"] as? [String], ["/g/a.nsp"])
+        XCTAssertEqual(archive.history, Data("[]".utf8))
+        XCTAssertThrowsError(try SettingsTransfer.decode(Data("nope".utf8)))
+    }
+}
