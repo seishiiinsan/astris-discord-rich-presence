@@ -188,3 +188,30 @@ final class TitleMatchingTests: XCTestCase {
         XCTAssertEqual(GameSettings(defaults: defaults).knownTitleIDs["Game.xci"], "0100AAA")
     }
 }
+
+final class PresenceLimitsTests: XCTestCase {
+    func testFieldLengths() {
+        XCTAssertEqual(Presence.field("A").count, 2, "Discord needs 2 characters")
+        XCTAssertEqual(Presence.field("  Zelda  "), "Zelda")
+        let long = Presence.field(String(repeating: "x", count: 200))
+        XCTAssertEqual(long.count, 128)
+        XCTAssertTrue(long.hasSuffix("…"))
+        XCTAssertEqual(Presence.field("Un très long libellé de bouton ici", max: 32).count, 32)
+    }
+
+    func testInvalidButtonsAndImageAreDropped() {
+        let p = Presence(details: "Mario", image: "not a url", buttons: [
+            ("Ok", "https://example.com"), ("", "https://example.com"), ("Bad", "ftp://x"), ("Two", "http://b.c"),
+        ])
+        let a = p.activity
+        XCTAssertNil(a["assets"])
+        let buttons = a["buttons"] as? [[String: String]]
+        XCTAssertEqual(buttons?.map { $0["label"] }, ["Ok", "Two"])
+    }
+
+    func testDiscordErrorReply() {
+        XCTAssertEqual(DiscordIPC.reply(from: ["evt": NSNull(), "cmd": "SET_ACTIVITY"]), .ok)
+        let error: [String: Any] = ["evt": "ERROR", "data": ["code": NSNumber(value: 4000), "message": "child \"activity\" fails"]]
+        XCTAssertEqual(DiscordIPC.reply(from: error), .rejected("child \"activity\" fails (4000)"))
+    }
+}

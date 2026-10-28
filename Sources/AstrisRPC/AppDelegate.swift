@@ -1,36 +1,6 @@
 import AppKit
 import Combine
 
-struct Presence: Equatable {
-    var details: String
-    var state: String?
-    var start: Date?
-    var image: String?
-    var imageText: String?
-    var buttons: [(label: String, url: String)] = []
-
-    static func == (a: Presence, b: Presence) -> Bool {
-        a.details == b.details && a.state == b.state && a.start == b.start
-            && a.image == b.image && a.imageText == b.imageText
-            && a.buttons.map { $0.label } == b.buttons.map { $0.label } && a.buttons.map { $0.url } == b.buttons.map { $0.url }
-    }
-
-    var activity: [String: Any] {
-        var a: [String: Any] = ["type": 0, "details": details]
-        if let state { a["state"] = state }
-        if let start { a["timestamps"] = ["start": Int(start.timeIntervalSince1970)] }
-        if let image {
-            var assets: [String: Any] = ["large_image": image]
-            if let imageText { assets["large_text"] = imageText }
-            a["assets"] = assets
-        }
-        if !buttons.isEmpty {
-            a["buttons"] = buttons.prefix(2).map { ["label": $0.label, "url": $0.url] }
-        }
-        return a
-    }
-}
-
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     static let clientID = "1564590186887774209"
     private static let astrisLogo =
@@ -67,6 +37,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let recentsItem = NSMenuItem(title: L10n.tr("Jeux récents", "Recent Games"), action: nil, keyEquivalent: "")
     private let checkItem = NSMenuItem(title: L10n.tr("Rechercher les mises à jour…", "Check for Updates…"), action: #selector(checkForUpdates), keyEquivalent: "")
     private var discordConnected = false
+    /// Last refusal from Discord for the current presence, shown in the menu.
+    private var discordError: String?
     private var timer: Timer?
     private var updateTimer: Timer?
 
@@ -210,11 +182,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     return
                 }
                 connectBackoff = 3
+                DispatchQueue.main.async { self.discordError = nil }
             }
-            if discord.setActivity(presence?.activity) {
+            switch discord.setActivity(presence?.activity) {
+            case .ok:
                 sentPresence = presence
                 hasSent = true
-            } else {
+                DispatchQueue.main.async { self.discordError = nil }
+            case .rejected(let message):
+                // Don't resend the same refused presence every 3 s.
+                sentPresence = presence
+                hasSent = true
+                DispatchQueue.main.async { self.discordError = message }
+            case .failed:
                 hasSent = false
             }
         }
@@ -351,7 +331,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // Discord row doubles as the fix: click to open Discord when it isn't running.
         // Without Astris there's nothing to show, so no IPC connection: judge by the running app.
-        if discordConnected {
+        discordItem.toolTip = nil
+        if #available(macOS 14.4, *) { discordItem.subtitle = nil }
+        if discordConnected, let discordError {
+            discordItem.title = L10n.tr("Discord a refusé l'affichage", "Discord rejected the presence")
+            discordItem.image = Self.symbol("exclamationmark.circle.fill", color: .systemOrange)
+            discordItem.toolTip = discordError
+            if #available(macOS 14.4, *) { discordItem.subtitle = discordError }
+            discordItem.isEnabled = false
+        } else if discordConnected {
             discordItem.title = L10n.tr("Connecté à Discord", "Connected to Discord")
             discordItem.image = Self.symbol("checkmark.circle.fill", color: .systemGreen)
             discordItem.isEnabled = false

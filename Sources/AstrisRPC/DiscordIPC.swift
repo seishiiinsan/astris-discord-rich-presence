@@ -30,8 +30,16 @@ final class DiscordIPC {
         fd = -1
     }
 
+    enum Reply: Equatable {
+        case ok
+        /// Discord answered with an error (invalid field, too long…): the connection stays up.
+        case rejected(String)
+        /// Socket error: disconnected.
+        case failed
+    }
+
     /// Sets the activity, or clears it when `activity` is nil.
-    func setActivity(_ activity: [String: Any]?) -> Bool {
+    func setActivity(_ activity: [String: Any]?) -> Reply {
         var args: [String: Any] = ["pid": Int(getpid())]
         if let activity { args["activity"] = activity }
         let payload: [String: Any] = [
@@ -39,11 +47,20 @@ final class DiscordIPC {
             "args": args,
             "nonce": UUID().uuidString,
         ]
-        guard send(.frame, payload), let (op, _) = readFrame(), op == Opcode.frame.rawValue else {
+        guard send(.frame, payload), let (op, body) = readFrame(), op == Opcode.frame.rawValue else {
             disconnect()
-            return false
+            return .failed
         }
-        return true
+        return Self.reply(from: body)
+    }
+
+    /// `{"evt": "ERROR", "data": {"code": 4000, "message": "…"}}` on a refused activity.
+    static func reply(from body: [String: Any]) -> Reply {
+        guard (body["evt"] as? String) == "ERROR" else { return .ok }
+        let data = body["data"] as? [String: Any]
+        let message = data?["message"] as? String ?? "Unknown error"
+        let code = (data?["code"] as? NSNumber).map { " (\($0.intValue))" } ?? ""
+        return .rejected(message + code)
     }
 
     // MARK: - Socket
