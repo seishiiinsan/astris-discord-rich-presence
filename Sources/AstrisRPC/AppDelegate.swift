@@ -38,6 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let settingsItem = NSMenuItem(title: L10n.tr("Réglages…", "Settings…"), action: #selector(openSettings), keyEquivalent: ",")
     private let updateItem = NSMenuItem(title: "", action: #selector(confirmUpdate), keyEquivalent: "")
     private let recentsItem = NSMenuItem(title: L10n.tr("Jeux récents", "Recent Games"), action: nil, keyEquivalent: "")
+    private let favoritesItem = NSMenuItem(title: L10n.tr("Favoris", "Favorites"), action: nil, keyEquivalent: "")
     private let checkItem = NSMenuItem(title: L10n.tr("Rechercher les mises à jour…", "Check for Updates…"), action: #selector(checkForUpdates), keyEquivalent: "")
     private let diagnosticItem = NSMenuItem(title: L10n.tr("Copier le diagnostic", "Copy Diagnostics"), action: #selector(copyDiagnostic), keyEquivalent: "")
     /// Last presence built by `tick`, for the diagnostic.
@@ -280,6 +281,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         recentsItem.image = Self.symbol("clock.arrow.circlepath")
         recentsItem.submenu = NSMenu()
         menu.addItem(recentsItem)
+        favoritesItem.image = Self.symbol("star")
+        favoritesItem.submenu = NSMenu()
+        favoritesItem.isHidden = settings.favorites.isEmpty
+        menu.addItem(favoritesItem)
         menu.addItem(.separator())
 
         // Settings.
@@ -321,19 +326,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: - Recent games
 
     private func refreshRecents() {
-        let submenu = recentsItem.submenu ?? NSMenu()
+        fill(recentsItem, with: recents.entries.map { (path: $0.romPath, name: $0.name, titleID: $0.titleID) })
+        fill(favoritesItem, with: settings.favorites.map { path -> (path: String, name: String, titleID: String?) in
+            let file = ((path as NSString).lastPathComponent as NSString).deletingPathExtension
+            let titleID = GameDetector.titleID(in: file)?.uppercased() ?? settings.knownTitleIDs[GameSettings.key(for: path)]
+            return (path: path, name: GameDetector.cleanName(file), titleID: titleID)
+        })
+        favoritesItem.isHidden = settings.favorites.isEmpty
+    }
+
+    /// One item per game, with its cover; a click opens it in Astris.
+    private func fill(_ parent: NSMenuItem, with games: [(path: String, name: String, titleID: String?)]) {
+        let submenu = parent.submenu ?? NSMenu()
         submenu.removeAllItems()
-        recentsItem.isEnabled = !recents.entries.isEmpty
-        for entry in recents.entries {
-            let item = NSMenuItem(title: settings.displayName(for: entry.romPath, detected: entry.name), action: #selector(openRecent(_:)), keyEquivalent: "")
+        parent.isEnabled = !games.isEmpty
+        for game in games {
+            let item = NSMenuItem(title: settings.displayName(for: game.path, detected: game.name), action: #selector(openRecent(_:)), keyEquivalent: "")
             item.target = self
-            item.representedObject = entry.romPath
-            item.toolTip = entry.romPath
-            item.isEnabled = FileManager.default.fileExists(atPath: entry.romPath)
-            if let custom = settings.prefs(for: entry.romPath).customCover {
+            item.representedObject = game.path
+            item.toolTip = game.path
+            item.isEnabled = FileManager.default.fileExists(atPath: game.path)
+            if let custom = settings.prefs(for: game.path).customCover {
                 item.image = thumbnails[custom] ?? Self.symbol("gamecontroller")
                 loadThumbnail(key: custom, link: custom)
-            } else if let id = entry.titleID {
+            } else if let id = game.titleID {
                 item.image = thumbnails[id] ?? Self.symbol("gamecontroller")
                 if let link = covers.cover(for: id) { loadThumbnail(key: id, link: link) }
             } else {
@@ -358,15 +374,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func openRecent(_ sender: NSMenuItem) {
         guard let path = sender.representedObject as? String else { return }
-        let astrisApp = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "V380-Ori.Astris")
-            ?? URL(fileURLWithPath: "/Applications/Astris.app")
-        NSWorkspace.shared.open([URL(fileURLWithPath: path)], withApplicationAt: astrisApp, configuration: .init()) { _, error in
-            guard let error else { return }
-            DispatchQueue.main.async {
-                NSApp.activate(ignoringOtherApps: true)
-                NSAlert(error: error).runModal()
-            }
-        }
+        AstrisLauncher.open(path)
     }
 
     private func refreshMenu(astrisRunning: Bool) {

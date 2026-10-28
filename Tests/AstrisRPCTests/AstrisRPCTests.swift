@@ -388,3 +388,17 @@ final class CustomCoverTests: XCTestCase {
         XCTAssertTrue(settings.prefs.isEmpty)
     }
 }
+
+final class FavoritesTests: XCTestCase {
+    func testFavoritesPersistInOrder() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "AstrisRPCTests-\(UUID().uuidString)"))
+        let settings = GameSettings(defaults: defaults)
+        settings.setFavorite(true, for: "/g/Zelda.nsp")
+        settings.setFavorite(true, for: "/g/Mario.xci")
+        settings.setFavorite(true, for: "/g/Zelda.nsp")
+        XCTAssertEqual(settings.favorites, ["/g/Mario.xci", "/g/Zelda.nsp"])
+        settings.setFavorite(false, for: "/g/Mario.xci")
+        XCTAssertEqual(GameSettings(defaults: defaults).favorites, ["/g/Zelda.nsp"])
+        XCTAssertTrue(settings.isFavorite("/g/Zelda.nsp"))
+    }
+}

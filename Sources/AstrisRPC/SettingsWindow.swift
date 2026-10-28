@@ -296,6 +296,21 @@ struct GamesSettingsView: View {
                 GameRow(game: game, settings: settings, covers: covers).tag(game.id)
             }
             .listStyle(.sidebar)
+            // Double-click launches; right-click for the rest.
+            .contextMenu(forSelectionType: GameLibrary.Game.ID.self) { ids in
+                if let path = ids.first {
+                    Button(L10n.tr("Lancer dans Astris", "Open in Astris")) { AstrisLauncher.open(path) }
+                    Button(settings.isFavorite(path) ? L10n.tr("Retirer des favoris", "Remove from Favorites") : L10n.tr("Ajouter aux favoris", "Add to Favorites")) {
+                        settings.setFavorite(!settings.isFavorite(path), for: path)
+                    }
+                    Divider()
+                    Button(L10n.tr("Afficher dans le Finder", "Show in Finder")) {
+                        NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+                    }
+                }
+            } primaryAction: { ids in
+                if let path = ids.first { AstrisLauncher.open(path) }
+            }
             Divider()
             Text(L10n.tr("\(games.count) jeux · \(hiddenCount) masqués", "\(games.count) games · \(hiddenCount) hidden"))
                 .font(.caption)
@@ -363,6 +378,11 @@ private struct GameRow: View {
                 }
             }
             Spacer(minLength: 0)
+            if settings.isFavorite(game.url.path) {
+                Image(systemName: "star.fill")
+                    .foregroundStyle(.yellow)
+                    .accessibilityLabel(L10n.tr("Favori", "Favorite"))
+            }
             if hidden {
                 Image(systemName: "eye.slash")
                     .foregroundStyle(.secondary)
@@ -474,7 +494,15 @@ private struct GameDetailView: View {
                 Button(L10n.tr("Afficher dans le Finder", "Show in Finder")) {
                     NSWorkspace.shared.activateFileViewerSelecting([game.url])
                 }
+                Toggle(isOn: Binding(
+                    get: { settings.isFavorite(path) },
+                    set: { settings.setFavorite($0, for: path) })) {
+                    Label(L10n.tr("Favori", "Favorite"), systemImage: settings.isFavorite(path) ? "star.fill" : "star")
+                }
+                .toggleStyle(.button)
                 Spacer()
+                Button(L10n.tr("Lancer dans Astris", "Open in Astris")) { AstrisLauncher.open(path) }
+                    .buttonStyle(.borderedProminent)
             }
             .padding([.horizontal, .bottom], 20)
         }

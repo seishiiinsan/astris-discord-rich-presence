@@ -36,6 +36,7 @@ final class GameSettings: ObservableObject {
     private static let eShopButtonKey = "eShopButton"
     private static let buttonLabelKey = "customButtonLabel"
     private static let buttonURLKey = "customButtonURL"
+    private static let favoritesKey = "favoriteGames"
 
     private let defaults: UserDefaults
 
@@ -88,6 +89,20 @@ final class GameSettings: ObservableObject {
         if let trimmed, !trimmed.isEmpty { defaults.set(trimmed, forKey: key) } else { defaults.removeObject(forKey: key) }
     }
 
+    /// Full ROM paths, in the order they were starred.
+    @Published private(set) var favorites: [String] {
+        didSet { defaults.set(favorites, forKey: Self.favoritesKey) }
+    }
+
+    func isFavorite(_ romPath: String) -> Bool {
+        favorites.contains(romPath)
+    }
+
+    func setFavorite(_ on: Bool, for romPath: String) {
+        favorites.removeAll { $0 == romPath }
+        if on { favorites.append(romPath) }
+    }
+
     @Published var gamesFolder: URL? {
         didSet { defaults.set(gamesFolder?.path, forKey: Self.folderKey) }
     }
@@ -114,6 +129,7 @@ final class GameSettings: ObservableObject {
         showEShopButton = defaults.object(forKey: Self.eShopButtonKey) as? Bool ?? true
         customButtonLabel = defaults.string(forKey: Self.buttonLabelKey)
         customButtonURL = defaults.string(forKey: Self.buttonURLKey)
+        favorites = defaults.stringArray(forKey: Self.favoritesKey) ?? []
         prefs = defaults.data(forKey: Self.prefsKey)
             .flatMap { try? JSONDecoder().decode([String: GamePrefs].self, from: $0) } ?? [:]
         knownTitleIDs = defaults.dictionary(forKey: Self.titleIDsKey) as? [String: String] ?? [:]
