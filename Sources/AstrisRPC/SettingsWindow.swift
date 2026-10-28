@@ -214,6 +214,9 @@ struct GeneralSettingsView: View {
                     Button(L10n.tr("Vider le cache des jaquettes", "Clear Cover Cache")) {
                         ImageCache.shared.clear()
                     }
+                    Button(L10n.tr("Toutes les fonctionnalités…", "All Features…")) {
+                        HelpPresenter.show()
+                    }
                 }
             } header: {
                 Text(L10n.tr("Dépannage", "Troubleshooting"))

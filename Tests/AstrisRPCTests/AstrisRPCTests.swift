@@ -845,3 +845,19 @@ final class GameUpdatesTests: XCTestCase {
         XCTAssertEqual(updates.newerBuild(titleID: "0100F2C0115B6000", installed: nil), 393216, "no update installed")
     }
 }
+
+final class HelpTests: XCTestCase {
+    func testSectionsAndSearch() {
+        L10n.isFrench = true
+        let sections = HelpContent.sections
+        XCTAssertGreaterThanOrEqual(sections.count, 8)
+        XCTAssertTrue(sections.allSatisfy { !$0.items.isEmpty })
+        let ids = sections.flatMap { s in s.items.map { s.title + "/" + $0.title } }
+        XCTAssertEqual(ids.count, Set(ids).count, "unique ids")
+        let found = HelpContent.filtered("streamer")
+        XCTAssertFalse(found.isEmpty)
+        XCTAssertTrue(found.flatMap(\.items).allSatisfy { $0.title.localizedCaseInsensitiveContains("streamer") || $0.text.localizedCaseInsensitiveContains("streamer") })
+        XCTAssertTrue(HelpContent.filtered("zzzz").isEmpty)
+        XCTAssertEqual(HelpContent.filtered("").count, sections.count)
+    }
+}

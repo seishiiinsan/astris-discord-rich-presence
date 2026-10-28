@@ -46,6 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let hideGameItem = NSMenuItem(title: L10n.tr("Masquer ce jeu sur Discord", "Hide This Game on Discord"), action: #selector(toggleHideGame), keyEquivalent: "")
     private let hotKeys = HotKeys()
     private let launcher = QuickLauncher()
+    private let helpItem = NSMenuItem(title: L10n.tr("Fonctionnalités…", "Features…"), action: #selector(openHelp), keyEquivalent: "?")
     private let launcherItem = NSMenuItem(title: L10n.tr("Lancer un jeu…", "Open a Game…"), action: #selector(openQuickLauncher), keyEquivalent: "")
     private let settingsItem = NSMenuItem(title: L10n.tr("Réglages…", "Settings…"), action: #selector(openSettings), keyEquivalent: ",")
     private let updateItem = NSMenuItem(title: "", action: #selector(confirmUpdate), keyEquivalent: "")
@@ -490,6 +491,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let versionItem = NSMenuItem(title: "Astris RPC \(Updater.currentVersion)", action: nil, keyEquivalent: "")
         versionItem.isEnabled = false
         menu.addItem(versionItem)
+        helpItem.target = self
+        helpItem.image = Self.symbol("questionmark.circle")
+        menu.addItem(helpItem)
         diagnosticItem.target = self
         diagnosticItem.image = Self.symbol("stethoscope")
         menu.addItem(diagnosticItem)
@@ -683,6 +687,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else if !settings.hotKeysEnabled && hotKeys.isRegistered {
             hotKeys.unregister()
         }
+    }
+
+    @objc private func openHelp() {
+        HelpPresenter.show()
     }
 
     @objc private func openSettings() {
