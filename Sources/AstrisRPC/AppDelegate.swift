@@ -151,7 +151,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let library = GameLibrary.scan(folder, known: known)
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
-                let all = library.map { (path: $0.url.path, name: settings.displayName(for: $0.url.path, detected: $0.name)) }
+                let all = library.map { (path: $0.url.path, name: self.settings.displayName(for: $0.url.path, detected: $0.name)) }
                 if let path = URLCommand.match(name, in: all) {
                     AstrisLauncher.open(path)
                 } else {
