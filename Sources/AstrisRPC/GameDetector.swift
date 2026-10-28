@@ -190,6 +190,33 @@ final class GameDetector {
         return MetadataEntry(titleID: titleID, date: date, json: json)
     }
 
+    struct AstrisGameInfo: Equatable {
+        var favorite = false
+        /// Total time Astris counted for the game.
+        var played: TimeInterval?
+    }
+
+    /// TitleID → favorite flag and play time, from every game's metadata.json.
+    static func astrisGameInfo() -> [String: AstrisGameInfo] {
+        var info: [String: AstrisGameInfo] = [:]
+        for dir in astrisGamesDirectories {
+            for game in (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? [] {
+                let file = game.appendingPathComponent("gui/metadata.json")
+                guard let data = try? Data(contentsOf: file),
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+                else { continue }
+                info[game.lastPathComponent.uppercased()] = gameInfo(json)
+            }
+        }
+        return info
+    }
+
+    static func gameInfo(_ json: [String: Any]) -> AstrisGameInfo {
+        AstrisGameInfo(
+            favorite: json["favorite"] as? Bool ?? false,
+            played: parsePlayed(json["timespan_played"] ?? json["time_played"]))
+    }
+
     /// Normalized game title → TitleID, from the `title` Astris stores in each game's metadata.
     static func metadataTitleIndex() -> [String: String] {
         var index: [String: String] = [:]

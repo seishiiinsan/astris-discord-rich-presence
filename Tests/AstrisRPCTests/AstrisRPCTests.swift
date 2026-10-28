@@ -458,3 +458,25 @@ final class ModeTemplateTests: XCTestCase {
         XCTAssertEqual(PresenceTemplate.render(template, values: ["played": nil, "multi": "Multijoueur local"]), "Sur Astris · Multijoueur local")
     }
 }
+
+final class AstrisFavoritesTests: XCTestCase {
+    func testGameInfo() {
+        let info = GameDetector.gameInfo(["favorite": true, "timespan_played": "02:00:00"])
+        XCTAssertTrue(info.favorite)
+        XCTAssertEqual(info.played, 7200)
+        XCTAssertFalse(GameDetector.gameInfo([:]).favorite)
+    }
+
+    func testImportOncePerTitle() throws {
+        let settings = GameSettings(defaults: try XCTUnwrap(UserDefaults(suiteName: "AstrisRPCTests-\(UUID().uuidString)")))
+        let games = [
+            GameLibrary.Game(url: URL(fileURLWithPath: "/g/Zelda.nsp"), name: "Zelda", titleID: "0100F2C0115B6000"),
+            GameLibrary.Game(url: URL(fileURLWithPath: "/g/Mario.xci"), name: "Mario", titleID: "0100EA80032EA000"),
+        ]
+        XCTAssertEqual(settings.importAstrisFavorites(games, astrisFavorites: ["0100F2C0115B6000"]), 1)
+        XCTAssertEqual(settings.favorites, ["/g/Zelda.nsp"])
+        settings.setFavorite(false, for: "/g/Zelda.nsp")
+        XCTAssertEqual(settings.importAstrisFavorites(games, astrisFavorites: ["0100F2C0115B6000"]), 0, "un-starred stays un-starred")
+        XCTAssertTrue(settings.favorites.isEmpty)
+    }
+}

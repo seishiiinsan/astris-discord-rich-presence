@@ -38,6 +38,7 @@ final class GameSettings: ObservableObject {
     private static let buttonURLKey = "customButtonURL"
     private static let favoritesKey = "favoriteGames"
     private static let hotKeysKey = "hotKeys"
+    private static let importedFavoritesKey = "importedAstrisFavorites"
 
     private let defaults: UserDefaults
 
@@ -104,6 +105,26 @@ final class GameSettings: ObservableObject {
         if on { favorites.append(romPath) }
     }
 
+    /// TitleIDs already taken from Astris' favorites: un-starring one here sticks.
+    private(set) var importedFavorites: Set<String> {
+        didSet { defaults.set(Array(importedFavorites).sorted(), forKey: Self.importedFavoritesKey) }
+    }
+
+    /// Stars the games Astris marks as favorite, once each. Returns how many were added.
+    @discardableResult
+    func importAstrisFavorites(_ games: [GameLibrary.Game], astrisFavorites: Set<String>) -> Int {
+        var added = 0
+        for game in games {
+            guard let id = game.titleID, astrisFavorites.contains(id), !importedFavorites.contains(id) else { continue }
+            importedFavorites.insert(id)
+            if !isFavorite(game.url.path) {
+                setFavorite(true, for: game.url.path)
+                added += 1
+            }
+        }
+        return added
+    }
+
     /// ⌃⌥⌘D / ⌃⌥⌘H anywhere in macOS.
     @Published var hotKeysEnabled: Bool {
         didSet { defaults.set(hotKeysEnabled, forKey: Self.hotKeysKey) }
@@ -141,6 +162,7 @@ final class GameSettings: ObservableObject {
         customButtonLabel = defaults.string(forKey: Self.buttonLabelKey)
         customButtonURL = defaults.string(forKey: Self.buttonURLKey)
         favorites = defaults.stringArray(forKey: Self.favoritesKey) ?? []
+        importedFavorites = Set(defaults.stringArray(forKey: Self.importedFavoritesKey) ?? [])
         hotKeysEnabled = defaults.object(forKey: Self.hotKeysKey) as? Bool ?? true
         language = L10n.Language(rawValue: defaults.string(forKey: L10n.languageKey) ?? "") ?? .system
         prefs = defaults.data(forKey: Self.prefsKey)

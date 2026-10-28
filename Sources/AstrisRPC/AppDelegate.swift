@@ -72,6 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settingsObserver = settings.objectWillChange.sink { [weak self] _ in
             DispatchQueue.main.async {
                 self?.syncHotKeys()
+                self?.importAstrisFavorites()
                 self?.tick()
             }
         }
@@ -89,6 +90,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                            name: NSWorkspace.didTerminateApplicationNotification, object: nil)
         astris = NSWorkspace.shared.runningApplications.first(where: isAstris)
         adoptAstrisGamesFolder()
+        importAstrisFavorites()
         astrisChanged()
         checkUpdates(manual: false)
         updateTimer = Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { [weak self] _ in
@@ -111,6 +113,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             astrisConfigDate = Date()
         }
         return astrisConfig
+    }
+
+    private var favoritesFolder: URL?
+
+    /// Stars Astris' favorites found in the games folder (in the background: the scan reads the disk).
+    private func importAstrisFavorites() {
+        guard let folder = settings.gamesFolder, folder != favoritesFolder else { return }
+        favoritesFolder = folder
+        let known = settings.knownTitleIDs
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let info = GameDetector.astrisGameInfo()
+            let favorites = Set(info.filter { $0.value.favorite }.keys)
+            guard !favorites.isEmpty else { return }
+            let games = GameLibrary.scan(folder, known: known, titles: GameDetector.metadataTitleIndex())
+            DispatchQueue.main.async {
+                guard let self else { return }
+                let added = settings.importAstrisFavorites(games, astrisFavorites: favorites)
+                if added > 0 { Log.shared.add("Imported \(added) favorite(s) from Astris") }
+            }
+        }
     }
 
     /// No folder chosen yet: use the one set in Astris.
