@@ -510,3 +510,30 @@ final class StreamerModeTests: XCTestCase {
         XCTAssertTrue(settings.hidesPlayedTime("/g/Mario.xci"), "per-game setting")
     }
 }
+
+final class URLCommandTests: XCTestCase {
+    private func parse(_ s: String) -> URLCommand? { URLCommand.parse(URL(string: s)!) }
+
+    func testParse() {
+        XCTAssertEqual(parse("astrisrpc://toggle"), .toggle)
+        XCTAssertEqual(parse("astrisrpc://on"), .show)
+        XCTAssertEqual(parse("ASTRISRPC://off"), .hide)
+        XCTAssertEqual(parse("astrisrpc:hide-game"), .hideGame)
+        XCTAssertEqual(parse("astrisrpc://streamer"), .streamer(nil))
+        XCTAssertEqual(parse("astrisrpc://streamer?on=1"), .streamer(true))
+        XCTAssertEqual(parse("astrisrpc://launch?game=Zelda%20TOTK"), .launch("Zelda TOTK"))
+        XCTAssertNil(parse("astrisrpc://launch"))
+        XCTAssertNil(parse("astrisrpc://nope"))
+        XCTAssertNil(parse("https://toggle"))
+    }
+
+    func testMatch() {
+        let games = [(path: "/g/a.nsp", name: "The Legend of Zelda: Tears of the Kingdom"),
+                     (path: "/g/b.nsp", name: "Zelda"),
+                     (path: "/g/c.xci", name: "Super Mario Odyssey")]
+        XCTAssertEqual(URLCommand.match("zelda", in: games), "/g/b.nsp", "exact first")
+        XCTAssertEqual(URLCommand.match("tears of the kingdom", in: games), "/g/a.nsp")
+        XCTAssertEqual(URLCommand.match("Mario", in: games), "/g/c.xci")
+        XCTAssertNil(URLCommand.match("Kirby", in: games))
+    }
+}

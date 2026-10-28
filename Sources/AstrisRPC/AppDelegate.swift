@@ -99,6 +99,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls {
+            guard let command = URLCommand.parse(url) else {
+                Log.shared.add("Unknown link: \(url.absoluteString)")
+                continue
+            }
+            Log.shared.add("Link: \(url.absoluteString)")
+            run(command)
+        }
+    }
+
+    private func run(_ command: URLCommand) {
+        switch command {
+        case .show: if !enabled { toggleEnabled() }
+        case .hide: if enabled { toggleEnabled() }
+        case .toggle: toggleEnabled()
+        case .hideGame: toggleHideGame()
+        case .streamer(let on):
+            settings.streamerMode = on ?? !settings.streamerMode
+            tick()
+        case .settings: openSettings()
+        case .launch(let name): launch(named: name)
+        }
+    }
+
+    /// Looks in recents, favorites, then the games folder.
+    private func launch(named name: String) {
+        var games = recents.entries.map { (path: $0.romPath, name: settings.displayName(for: $0.romPath, detected: $0.name)) }
+        games += settings.favorites.map { path in
+            let file = ((path as NSString).lastPathComponent as NSString).deletingPathExtension
+            return (path: path, name: settings.displayName(for: path, detected: GameDetector.cleanName(file)))
+        }
+        if let path = URLCommand.match(name, in: games) {
+            AstrisLauncher.open(path)
+            return
+        }
+        guard let folder = settings.gamesFolder else { NSSound.beep(); return }
+        let known = settings.knownTitleIDs
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let library = GameLibrary.scan(folder, known: known)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                let all = library.map { (path: $0.url.path, name: settings.displayName(for: $0.url.path, detected: $0.name)) }
+                if let path = URLCommand.match(name, in: all) {
+                    AstrisLauncher.open(path)
+                } else {
+                    Log.shared.add("No game matches “\(name)”")
+                    NSSound.beep()
+                }
+            }
+        }
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         history.save()
         discordQueue.sync {
