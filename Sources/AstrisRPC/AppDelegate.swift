@@ -45,9 +45,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let streamerItem = NSMenuItem(title: L10n.tr("Mode streamer", "Streamer Mode"), action: #selector(toggleStreamer), keyEquivalent: "")
     private let hideGameItem = NSMenuItem(title: L10n.tr("Masquer ce jeu sur Discord", "Hide This Game on Discord"), action: #selector(toggleHideGame), keyEquivalent: "")
     private let hotKeys = HotKeys()
+    private let launcher = QuickLauncher()
+    private let helpItem = NSMenuItem(title: L10n.tr("Fonctionnalités…", "Features…"), action: #selector(openHelp), keyEquivalent: "?")
+    private let launcherItem = NSMenuItem(title: L10n.tr("Lancer un jeu…", "Open a Game…"), action: #selector(openQuickLauncher), keyEquivalent: "")
     private let settingsItem = NSMenuItem(title: L10n.tr("Réglages…", "Settings…"), action: #selector(openSettings), keyEquivalent: ",")
     private let updateItem = NSMenuItem(title: "", action: #selector(confirmUpdate), keyEquivalent: "")
     private let recentsItem = NSMenuItem(title: L10n.tr("Jeux récents", "Recent Games"), action: nil, keyEquivalent: "")
+    private let screenshotItem = NSMenuItem(title: L10n.tr("Dernière capture", "Latest Screenshot"), action: nil, keyEquivalent: "")
+    private var lastScreenshot: (url: URL, date: Date)?
+    private var lastPlayedRom: String?
+    private var backingUp = false
+    private let controllersItem = NSMenuItem(title: L10n.tr("Manettes", "Controllers"), action: nil, keyEquivalent: "")
+    /// Controllers already reported as low, until they charge again.
+    private var lowBatteryNotified: Set<String> = []
     private let favoritesItem = NSMenuItem(title: L10n.tr("Favoris", "Favorites"), action: nil, keyEquivalent: "")
     private let checkItem = NSMenuItem(title: L10n.tr("Rechercher les mises à jour…", "Check for Updates…"), action: #selector(checkForUpdates), keyEquivalent: "")
     private let diagnosticItem = NSMenuItem(title: L10n.tr("Copier le diagnostic", "Copy Diagnostics"), action: #selector(copyDiagnostic), keyEquivalent: "")
@@ -86,6 +96,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             switch action {
             case .toggleDiscord: self?.toggleEnabled()
             case .toggleHideGame: self?.toggleHideGame()
+            case .quickLaunch: self?.openQuickLauncher()
             }
         }
         syncHotKeys()
@@ -105,8 +116,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         notifier.requestAuthorization()
         summaryTimer = Timer.scheduledTimer(withTimeInterval: 30 * 60, repeats: true) { [weak self] _ in
             self?.sendWeeklySummaryIfDue()
+            self?.backUpWeeklyIfDue()
         }
         sendWeeklySummaryIfDue()
+        backUpWeeklyIfDue()
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
@@ -131,6 +144,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             tick()
         case .settings: openSettings()
         case .launch(let name): launch(named: name)
+        }
+    }
+
+    /// Floating search; the library is (re)scanned in the background each time it opens.
+    @objc private func openQuickLauncher() {
+        launcher.onLaunch = { AstrisLauncher.open($0) }
+        let recent = recents.entries.map { LauncherModel.Entry(path: $0.romPath, name: $0.name, titleID: $0.titleID) }
+        let favorites = settings.favorites.map { path -> LauncherModel.Entry in
+            let file = ((path as NSString).lastPathComponent as NSString).deletingPathExtension
+            return LauncherModel.Entry(path: path, name: GameDetector.cleanName(file),
+                                       titleID: GameDetector.titleID(in: file)?.uppercased() ?? settings.knownTitleIDs[GameSettings.key(for: path)])
+        }
+        launcher.model.entries = LauncherModel.merge([recent, favorites, launcher.model.entries])
+        launcher.toggle(covers: covers, settings: settings)
+        guard let folder = settings.gamesFolder else { return }
+        let known = settings.knownTitleIDs
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let library = GameLibrary.scan(folder, known: known, titles: GameDetector.metadataTitleIndex())
+                .map { LauncherModel.Entry(path: $0.url.path, name: $0.name, titleID: $0.titleID) }
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.launcher.model.entries = LauncherModel.merge([recent, favorites, library])
+            }
         }
     }
 
@@ -278,6 +314,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     "played": settings.hidesPlayedTime(detector.romPath) ? nil : game.playedTime.flatMap(Self.formatPlayed),
                     "version": version,
                     "mode": mode,
+                    "status": detector.romPath.flatMap { settings.prefs(for: $0).status?.label },
                     "multi": config?.multiplayer == true ? L10n.tr("Multijoueur local", "Local multiplayer") : nil,
                 ]
                 var buttons: [(label: String, url: String)] = []
@@ -313,6 +350,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if isIdle != wasIdle { Log.shared.add(isIdle ? "Idle" : "Back from idle") }
         let played = isIdle ? nil : detector.game
         history.update(name: played?.name, titleID: played?.titleID, romPath: played == nil ? nil : detector.romPath)
+        checkReminders()
+        checkControllerBatteries()
+        if astris != nil { checkScreenshots() }
+        let rom = detector.romPath
+        if lastPlayedRom != nil, rom != lastPlayedRom, settings.autoBackup == .gameClosed { backUpSaves(reason: "game closed") }
+        lastPlayedRom = rom
         if isIdle, presence != nil {
             // Paused: no running clock.
             presence?.state = L10n.tr("En pause · Sur Astris", "Idle · On Astris")
@@ -415,6 +458,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         favoritesItem.submenu = NSMenu()
         favoritesItem.isHidden = settings.favorites.isEmpty
         menu.addItem(favoritesItem)
+        screenshotItem.image = Self.symbol("camera")
+        screenshotItem.submenu = NSMenu()
+        menu.addItem(screenshotItem)
+        controllersItem.image = Self.symbol("gamecontroller")
+        controllersItem.submenu = NSMenu()
+        menu.addItem(controllersItem)
         menu.addItem(.separator())
 
         // Settings.
@@ -422,6 +471,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         hideGameItem.image = Self.symbol("eye.slash")
         settingsItem.image = Self.symbol("gearshape")
         streamerItem.image = Self.symbol("video")
+        launcherItem.image = Self.symbol("magnifyingglass")
+        launcherItem.target = self
+        menu.insertItem(launcherItem, at: menu.index(of: recentsItem))
         for item in [enabledItem, hideGameItem, streamerItem, settingsItem] {
             item.target = self
             menu.addItem(item)
@@ -439,6 +491,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let versionItem = NSMenuItem(title: "Astris RPC \(Updater.currentVersion)", action: nil, keyEquivalent: "")
         versionItem.isEnabled = false
         menu.addItem(versionItem)
+        helpItem.target = self
+        helpItem.image = Self.symbol("questionmark.circle")
+        menu.addItem(helpItem)
         diagnosticItem.target = self
         diagnosticItem.image = Self.symbol("stethoscope")
         menu.addItem(diagnosticItem)
@@ -453,6 +508,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
         refreshMenu(astrisRunning: astris != nil)
         refreshRecents()
+        refreshControllers()
+        refreshScreenshotItem()
     }
 
     // MARK: - Recent games
@@ -557,7 +614,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         hideGameItem.isHidden = detector.game == nil
         hideGameItem.state = detector.romPath.map(settings.isHidden) == true ? .on : .off
         let shortcutMask: NSEvent.ModifierFlags = [.control, .option, .command]
-        for (item, action) in [(enabledItem, HotKeys.Action.toggleDiscord), (hideGameItem, .toggleHideGame)] {
+        for (item, action) in [(enabledItem, HotKeys.Action.toggleDiscord), (hideGameItem, .toggleHideGame), (launcherItem, .quickLaunch)] {
             // Shown as a hint; the global hot key does the work.
             item.keyEquivalent = hotKeys.isRegistered ? HotKeys.keyEquivalent(action) : ""
             item.keyEquivalentModifierMask = shortcutMask
@@ -584,6 +641,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             iconSymbol = symbol
             button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
         }
+        let start = settings.menuBarTimer ? history.currentSessionStart : nil
+        button.title = start.map { " " + PlayHistory.clock(Date().timeIntervalSince($0)) } ?? ""
+        button.imagePosition = .imageLeading
         button.toolTip = label
         button.setAccessibilityLabel(label)
         button.appearsDisabled = !enabled || !astrisRunning
@@ -629,6 +689,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    @objc private func openHelp() {
+        HelpPresenter.show()
+    }
+
     @objc private func openSettings() {
         if settingsWindow == nil {
             settingsWindow = SettingsWindowController(settings: settings, covers: covers, recents: recents, history: history)
@@ -637,6 +701,158 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     // MARK: - Notifications
+
+    // MARK: - Screenshots and saves
+
+    private var screenshotsChecked = false
+
+    private func checkScreenshots() {
+        let found = AstrisFiles.latestScreenshot()
+        // The first look only sets the baseline: older screenshots aren't news.
+        guard screenshotsChecked else {
+            screenshotsChecked = true
+            lastScreenshot = found
+            return
+        }
+        guard let latest = found, latest.date > (lastScreenshot?.date ?? .distantPast) else { return }
+        lastScreenshot = latest
+        Log.shared.add("Screenshot: \(latest.url.lastPathComponent)")
+        if settings.copyScreenshots { copyImage(latest.url) }
+        if settings.notifyScreenshots {
+            notifier.send(id: "screenshot", title: L10n.tr("Capture enregistrée", "Screenshot saved"),
+                          body: settings.copyScreenshots ? L10n.tr("Copiée dans le presse-papiers.", "Copied to the clipboard.") : latest.url.lastPathComponent)
+        }
+    }
+
+    private func refreshScreenshotItem() {
+        let submenu = screenshotItem.submenu ?? NSMenu()
+        submenu.removeAllItems()
+        guard let shot = AstrisFiles.latestScreenshot() else {
+            screenshotItem.isHidden = true
+            return
+        }
+        screenshotItem.isHidden = false
+        let date = NSMenuItem(title: shot.date.formatted(date: .abbreviated, time: .shortened), action: nil, keyEquivalent: "")
+        date.isEnabled = false
+        submenu.addItem(date)
+        let copy = NSMenuItem(title: L10n.tr("Copier", "Copy"), action: #selector(copyLatestScreenshot), keyEquivalent: "")
+        let show = NSMenuItem(title: L10n.tr("Afficher dans le Finder", "Show in Finder"), action: #selector(showLatestScreenshot), keyEquivalent: "")
+        for item in [copy, show] {
+            item.target = self
+            submenu.addItem(item)
+        }
+    }
+
+    @objc private func copyLatestScreenshot() {
+        if let shot = AstrisFiles.latestScreenshot() { copyImage(shot.url) }
+    }
+
+    @objc private func showLatestScreenshot() {
+        if let shot = AstrisFiles.latestScreenshot() { NSWorkspace.shared.activateFileViewerSelecting([shot.url]) }
+    }
+
+    private func copyImage(_ url: URL) {
+        guard let image = NSImage(contentsOf: url) else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.writeObjects([image])
+    }
+
+    private func backUpWeeklyIfDue() {
+        guard settings.autoBackup == .weekly, detector.game == nil, AstrisFiles.saveDirectory != nil else { return }
+        let last = AstrisFiles.backups().first
+            .flatMap { (try? $0.resourceValues(forKeys: [.creationDateKey]))?.creationDate } ?? .distantPast
+        if Date().timeIntervalSince(last) >= 7 * 86400 { backUpSaves(reason: "weekly") }
+    }
+
+    /// In the background; one at a time.
+    private func backUpSaves(reason: String) {
+        guard !backingUp, AstrisFiles.saveDirectory != nil else { return }
+        backingUp = true
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let result = Result { try AstrisFiles.backUpSaves() }
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.backingUp = false
+                switch result {
+                case .success(let archive): Log.shared.add("Saves backed up (\(reason)): \(archive.lastPathComponent)")
+                case .failure(let error): Log.shared.add("Save backup failed: \(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
+    private func refreshControllers() {
+        let pads = Controllers.current()
+        let submenu = controllersItem.submenu ?? NSMenu()
+        submenu.removeAllItems()
+        controllersItem.isHidden = pads.isEmpty
+        for pad in pads {
+            let item = NSMenuItem(title: Controllers.label(pad), action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            let level = pad.battery ?? 1
+            let symbol = pad.charging ? "battery.100.bolt" : level <= 0.2 ? "battery.25" : level <= 0.6 ? "battery.50" : "battery.100"
+            item.image = Self.symbol(symbol, color: Controllers.isLow(pad) ? .systemRed : nil)
+            submenu.addItem(item)
+        }
+        if let low = pads.first(where: Controllers.isLow) {
+            controllersItem.title = L10n.tr("Manettes — batterie faible", "Controllers — low battery")
+            controllersItem.toolTip = Controllers.label(low)
+        } else {
+            controllersItem.title = L10n.tr("Manettes", "Controllers")
+            controllersItem.toolTip = nil
+        }
+    }
+
+    private func checkControllerBatteries() {
+        let pads = Controllers.current()
+        for pad in pads where !Controllers.isLow(pad) { lowBatteryNotified.remove(pad.name) }
+        guard settings.notifyLowBattery else { return }
+        for pad in pads where Controllers.isLow(pad) && !lowBatteryNotified.contains(pad.name) {
+            lowBatteryNotified.insert(pad.name)
+            notifier.send(id: "battery-\(pad.name)", title: L10n.tr("Batterie faible", "Low battery"),
+                          body: L10n.tr("\(Controllers.label(pad)) : pense à la recharger.", "\(Controllers.label(pad)): time to charge it."))
+            Log.shared.add("Low battery: \(Controllers.label(pad))")
+        }
+    }
+
+    private var lastBreakReminder: Date?
+    private var lastMilestoneTotal: (rom: String, seconds: TimeInterval)?
+    private var lastSessionLength: TimeInterval = 0
+
+    /// Break reminder, play-time milestones and session record, checked at each poll.
+    private func checkReminders(now: Date = Date()) {
+        let start = history.currentSessionStart
+        if PlayReminders.isBreakDue(sessionStart: start, now: now, everyMinutes: settings.breakReminderMinutes, lastReminder: lastBreakReminder),
+           let start {
+            lastBreakReminder = now
+            notifier.send(
+                id: "break",
+                title: L10n.tr("Petite pause ?", "Time for a break?"),
+                body: L10n.tr("Tu joues depuis \(PlayHistory.format(now.timeIntervalSince(start))). Bois un verre d'eau, étire-toi.",
+                              "You've been playing for \(PlayHistory.format(now.timeIntervalSince(start))). Drink some water, stretch."))
+        }
+
+        let session = start.map { now.timeIntervalSince($0) } ?? 0
+        defer { lastSessionLength = session }
+        guard settings.notifyMilestones, let game = detector.game, let rom = detector.romPath, start != nil else {
+            lastMilestoneTotal = nil
+            return
+        }
+        let name = settings.displayName(for: rom, detected: game.name)
+        let total = (game.playedTime ?? 0) + now.timeIntervalSince(game.start)
+        if let last = lastMilestoneTotal, last.rom == rom,
+           let hours = PlayReminders.crossedMilestone(from: last.seconds, to: total),
+           settings.markMilestone(hours, for: rom) {
+            notifier.send(id: "milestone-\(hours)", title: L10n.tr("\(hours) h sur \(name) 🎉", "\(hours) h on \(name) 🎉"),
+                          body: L10n.tr("Un palier de plus.", "Another milestone."))
+            Log.shared.add("Milestone: \(hours) h on \(name)")
+        }
+        lastMilestoneTotal = (rom, total)
+        if PlayReminders.beatsRecord(current: session, previousCurrent: lastSessionLength, record: history.longestPastSession) {
+            notifier.send(id: "record", title: L10n.tr("Record de session !", "Session record!"),
+                          body: L10n.tr("Plus longue session jamais comptée, sur \(name).", "Longest session ever counted, on \(name)."))
+        }
+    }
 
     private func notifyDiscordLost() {
         guard settings.notifyDiscordLost else { return }

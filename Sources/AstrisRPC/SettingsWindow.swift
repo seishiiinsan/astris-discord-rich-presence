@@ -14,6 +14,9 @@ final class SettingsWindowController: NSWindowController {
         let discord = NSHostingController(rootView: DiscordSettingsView(settings: settings))
         let games = NSHostingController(rootView: GamesSettingsView(settings: settings, covers: covers, recents: recents))
         let stats = NSHostingController(rootView: StatsView(history: history, settings: settings, covers: covers))
+        let tools = NSHostingController(rootView: ToolsView(settings: settings, history: history))
+        tools.sizingOptions = .preferredContentSize
+        tools.title = L10n.tr("Outils", "Tools")
         general.sizingOptions = .preferredContentSize
         discord.sizingOptions = .preferredContentSize
         games.sizingOptions = .preferredContentSize
@@ -41,6 +44,10 @@ final class SettingsWindowController: NSWindowController {
         statsItem.label = L10n.tr("Statistiques", "Stats")
         statsItem.image = NSImage(systemSymbolName: "chart.bar", accessibilityDescription: nil)
         tabs.addTabViewItem(statsItem)
+        let toolsItem = NSTabViewItem(viewController: tools)
+        toolsItem.label = L10n.tr("Outils", "Tools")
+        toolsItem.image = NSImage(systemSymbolName: "wrench.and.screwdriver", accessibilityDescription: nil)
+        tabs.addTabViewItem(toolsItem)
 
         let window = NSWindow(contentViewController: tabs)
         window.styleMask = [.titled, .closable]
@@ -120,9 +127,11 @@ struct GeneralSettingsView: View {
                 Toggle(L10n.tr("Ouvrir à la connexion", "Open at Login"), isOn: Binding(
                     get: { openAtLogin },
                     set: setOpenAtLogin))
+                Toggle(L10n.tr("Chrono de session dans la barre des menus", "Session timer in the menu bar"), isOn: $settings.menuBarTimer)
                 Toggle(isOn: $settings.hotKeysEnabled) {
                     Text(L10n.tr("Raccourcis clavier globaux", "Global keyboard shortcuts"))
-                    Text(L10n.tr("⌃⌥⌘D afficher sur Discord · ⌃⌥⌘H masquer le jeu en cours", "⌃⌥⌘D show on Discord · ⌃⌥⌘H hide the current game"))
+                    Text(L10n.tr("⌃⌥⌘D afficher sur Discord · ⌃⌥⌘H masquer le jeu en cours · ⌃⌥⌘G lancer un jeu",
+                                 "⌃⌥⌘D show on Discord · ⌃⌥⌘H hide the current game · ⌃⌥⌘G open a game"))
                 }
                 Picker(L10n.tr("Afficher « En pause » après", "Show “Idle” after"), selection: $settings.idleMinutes) {
                     ForEach(GameSettings.idleChoices, id: \.self) { minutes in
@@ -184,6 +193,13 @@ struct GeneralSettingsView: View {
                 Toggle(L10n.tr("Discord déconnecté en jeu", "Discord disconnected while playing"), isOn: $settings.notifyDiscordLost)
                 Toggle(L10n.tr("Mise à jour disponible", "Update available"), isOn: $settings.notifyUpdates)
                 Toggle(L10n.tr("Bilan de la semaine (dimanche soir)", "Weekly summary (Sunday evening)"), isOn: $settings.notifyWeeklySummary)
+                Toggle(L10n.tr("Paliers (10, 25, 50, 100 h…) et records de session", "Milestones (10, 25, 50, 100 h…) and session records"), isOn: $settings.notifyMilestones)
+                Toggle(L10n.tr("Batterie de manette faible (20 %)", "Low controller battery (20%)"), isOn: $settings.notifyLowBattery)
+                Picker(L10n.tr("Rappel de pause", "Break reminder"), selection: $settings.breakReminderMinutes) {
+                    ForEach(PlayReminders.breakChoices, id: \.self) { minutes in
+                        Text(minutes == 0 ? L10n.tr("Jamais", "Never") : PlayHistory.format(TimeInterval(minutes * 60))).tag(minutes)
+                    }
+                }
             } header: {
                 Text("Notifications")
             }
@@ -197,6 +213,9 @@ struct GeneralSettingsView: View {
                     .disabled(!FileManager.default.fileExists(atPath: Log.file.path))
                     Button(L10n.tr("Vider le cache des jaquettes", "Clear Cover Cache")) {
                         ImageCache.shared.clear()
+                    }
+                    Button(L10n.tr("Toutes les fonctionnalités…", "All Features…")) {
+                        HelpPresenter.show()
                     }
                 }
             } header: {
@@ -238,8 +257,8 @@ struct DiscordSettingsView: View {
                 Text(L10n.tr("Texte", "Text"))
             } footer: {
                 Text(L10n.tr(
-                    "Variables : {game} nom du jeu, {played} temps déjà joué, {version} version, {mode} mode TV ou portable, {multi} « Multijoueur local » si actif dans Astris. Une partie « · » dont la variable est inconnue est retirée. Vide : texte par défaut.",
-                    "Variables: {game} game name, {played} time already played, {version} version, {mode} TV or handheld mode, {multi} “Local multiplayer” when on in Astris. A “ · ” part whose variable is unknown is left out. Empty: default text."))
+                    "Variables : {game} nom du jeu, {played} temps déjà joué, {version} version, {mode} mode TV ou portable, {multi} « Multijoueur local » si actif dans Astris, {status} statut du jeu (En cours…). Une partie « · » dont la variable est inconnue est retirée. Vide : texte par défaut.",
+                    "Variables: {game} game name, {played} time already played, {version} version, {mode} TV or handheld mode, {multi} “Local multiplayer” when on in Astris, {status} game status (Playing…). A “ · ” part whose variable is unknown is left out. Empty: default text."))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -317,12 +336,28 @@ struct GamesSettingsView: View {
     @State private var games: [GameLibrary.Game] = []
     @State private var selection: GameLibrary.Game.ID?
     @State private var search = ""
+    @State private var filter = Filter.all
+    @State private var bySize = false
+    @State private var duplicates: Set<GameLibrary.Game.ID> = []
+
+    enum Filter: Hashable {
+        case all, favorites, status(PlayStatus)
+    }
 
     private var filtered: [GameLibrary.Game] {
-        guard !search.isEmpty else { return games }
-        return games.filter {
-            settings.displayName(for: $0.url.path, detected: $0.name).localizedCaseInsensitiveContains(search)
+        var list = games.filter { game in
+            switch filter {
+            case .all: return true
+            case .favorites: return settings.isFavorite(game.url.path)
+            case .status(let status): return settings.prefs(for: game.url.path).status == status
+            }
         }
+        if !search.isEmpty {
+            list = list.filter {
+                settings.displayName(for: $0.url.path, detected: $0.name).localizedCaseInsensitiveContains(search)
+            }
+        }
+        return bySize ? list.sorted { $0.size > $1.size } : list
     }
 
     var body: some View {
@@ -372,9 +407,27 @@ struct GamesSettingsView: View {
         VStack(spacing: 0) {
             TextField(L10n.tr("Rechercher", "Search"), text: $search)
                 .textFieldStyle(.roundedBorder)
-                .padding(10)
+                .padding([.horizontal, .top], 10)
+            HStack {
+                Picker(L10n.tr("Afficher", "Show"), selection: $filter) {
+                    Text(L10n.tr("Tous", "All")).tag(Filter.all)
+                    Text(L10n.tr("Favoris", "Favorites")).tag(Filter.favorites)
+                    Divider()
+                    ForEach(PlayStatus.allCases, id: \.self) { status in
+                        Label(status.label, systemImage: status.symbol).tag(Filter.status(status))
+                    }
+                }
+                .labelsHidden()
+                Picker(L10n.tr("Tri", "Sort"), selection: $bySize) {
+                    Text(L10n.tr("Nom", "Name")).tag(false)
+                    Text(L10n.tr("Taille", "Size")).tag(true)
+                }
+                .labelsHidden()
+                .fixedSize()
+            }
+            .padding(10)
             List(filtered, selection: $selection) { game in
-                GameRow(game: game, settings: settings, covers: covers).tag(game.id)
+                GameRow(game: game, settings: settings, covers: covers, duplicate: duplicates.contains(game.id)).tag(game.id)
             }
             .listStyle(.sidebar)
             // Double-click launches; right-click for the rest.
@@ -393,11 +446,17 @@ struct GamesSettingsView: View {
                 if let path = ids.first { AstrisLauncher.open(path) }
             }
             Divider()
-            Text(L10n.tr("\(games.count) jeux · \(hiddenCount) masqués", "\(games.count) games · \(hiddenCount) hidden"))
+            Text(L10n.tr(
+                "\(games.count) jeux · \(GameLibrary.formatSize(totalSize)) · \(hiddenCount) masqués" + (duplicates.isEmpty ? "" : " · \(duplicates.count) doublons"),
+                "\(games.count) games · \(GameLibrary.formatSize(totalSize)) · \(hiddenCount) hidden" + (duplicates.isEmpty ? "" : " · \(duplicates.count) duplicates")))
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .padding(8)
         }
+    }
+
+    private var totalSize: Int64 {
+        games.reduce(0) { $0 + $1.size }
     }
 
     private var hiddenCount: Int {
@@ -426,6 +485,7 @@ struct GamesSettingsView: View {
             if let id = entry.titleID { known[(entry.romPath as NSString).lastPathComponent] = id }
         }
         games = GameLibrary.scan(folder, known: known, titles: GameDetector.metadataTitleIndex())
+        duplicates = GameLibrary.duplicates(games)
         if selection == nil || !games.contains(where: { $0.id == selection }) {
             selection = games.first?.id
         }
@@ -442,6 +502,8 @@ private struct GameRow: View {
     let game: GameLibrary.Game
     @ObservedObject var settings: GameSettings
     let covers: CoverResolver
+    var duplicate = false
+    @ObservedObject private var updates = GameUpdates.shared
 
     var body: some View {
         let hidden = settings.isHidden(game.url.path)
@@ -452,10 +514,16 @@ private struct GameRow: View {
                 Text(settings.displayName(for: game.url.path, detected: game.name))
                     .lineLimit(1)
                     .foregroundStyle(hidden ? .secondary : .primary)
-                if hidden {
-                    Text(L10n.tr("Masqué sur Discord", "Hidden on Discord"))
+                let caption = [
+                    hidden ? L10n.tr("Masqué sur Discord", "Hidden on Discord") : nil,
+                    settings.prefs(for: game.url.path).status?.label,
+                    duplicate ? L10n.tr("Doublon", "Duplicate") : nil,
+                    newerBuild.map { L10n.tr("Mise à jour dispo (\(GameUpdates.label($0)))", "Update available (\(GameUpdates.label($0)))") },
+                ].compactMap { $0 }.joined(separator: " · ")
+                if !caption.isEmpty {
+                    Text(caption)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(duplicate ? .orange : .secondary)
                 }
             }
             Spacer(minLength: 0)
@@ -471,6 +539,12 @@ private struct GameRow: View {
             }
         }
         .padding(.vertical, 2)
+        .onAppear { if let id = game.titleID, GameDetector.kind(of: id) == .base { updates.check(id) } }
+    }
+
+    private var newerBuild: Int? {
+        updates.newerBuild(titleID: game.titleID, installed: GameDetector.installedBuild(
+            titleID: game.titleID, romFileName: game.url.deletingPathExtension().lastPathComponent))
     }
 }
 
@@ -481,6 +555,7 @@ private struct GameDetailView: View {
     @State private var name = ""
     @State private var coverLink = ""
     @State private var details = ""
+    @State private var note = ""
     @State private var state = ""
 
     private var path: String { game.url.path }
@@ -509,7 +584,7 @@ private struct GameDetailView: View {
                     .font(.title2.weight(.semibold))
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
-                Text(game.url.lastPathComponent)
+                Text(game.url.lastPathComponent + " · " + GameLibrary.formatSize(game.size))
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -526,6 +601,36 @@ private struct GameDetailView: View {
             .padding(.horizontal, 24)
 
             Form {
+                Section {
+                    Picker(L10n.tr("Statut", "Status"), selection: Binding(
+                        get: { settings.prefs(for: path).status },
+                        set: { settings.setStatus($0, for: path) })) {
+                        Text(L10n.tr("Aucun", "None")).tag(PlayStatus?.none)
+                        ForEach(PlayStatus.allCases, id: \.self) { status in
+                            Label(status.label, systemImage: status.symbol).tag(PlayStatus?.some(status))
+                        }
+                    }
+                    LabeledContent(L10n.tr("Note", "Rating")) {
+                        HStack(spacing: 2) {
+                            ForEach(1...5, id: \.self) { star in
+                                Button {
+                                    let current = settings.prefs(for: path).rating
+                                    settings.setRating(current == star ? nil : star, for: path)
+                                } label: {
+                                    Image(systemName: (settings.prefs(for: path).rating ?? 0) >= star ? "star.fill" : "star")
+                                        .foregroundStyle(.yellow)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("\(star)")
+                            }
+                        }
+                    }
+                    TextField(L10n.tr("Mémo", "Memo"), text: $note, prompt: Text(L10n.tr("Où j'en suis, à faire…", "Where I'm at, to do…")), axis: .vertical)
+                        .lineLimit(1...4)
+                        .onChange(of: note) { settings.setNote($0, for: path) }
+                } header: {
+                    Text(L10n.tr("Suivi", "Tracking"))
+                }
                 Section {
                     Toggle(L10n.tr("Afficher sur Discord", "Show on Discord"), isOn: Binding(
                         get: { !settings.isHidden(path) },
@@ -609,6 +714,7 @@ private struct GameDetailView: View {
         .onAppear {
             name = settings.prefs(for: path).customName ?? ""
             details = settings.prefs(for: path).detailsTemplate ?? ""
+            note = settings.prefs(for: path).note ?? ""
             state = settings.prefs(for: path).stateTemplate ?? ""
             let cover = settings.prefs(for: path).customCover
             coverLink = cover.flatMap { URL(string: $0)?.isFileURL == true ? nil : $0 } ?? ""
@@ -641,6 +747,176 @@ private struct GameDetailView: View {
         } else {
             settings.setCustomCover(url.absoluteString, for: path)
             coverLink = url.absoluteString
+        }
+    }
+}
+
+// MARK: - Tools
+
+struct ToolsView: View {
+    @ObservedObject var settings: GameSettings
+    let history: PlayHistory
+    @State private var backups: [URL] = []
+    @State private var status: String?
+    @State private var working = false
+    @State private var restoreTarget: URL?
+    @State private var confirmImport: URL?
+
+    var body: some View {
+        Form {
+            Section {
+                Toggle(L10n.tr("Notification à chaque capture", "Notify on each screenshot"), isOn: $settings.notifyScreenshots)
+                Toggle(L10n.tr("Copier la capture dans le presse-papiers", "Copy the screenshot to the clipboard"), isOn: $settings.copyScreenshots)
+                Button(L10n.tr("Ouvrir le dossier des captures", "Open Screenshots Folder")) {
+                    if let dir = AstrisFiles.screenshotDirectories.first(where: { FileManager.default.fileExists(atPath: $0.path) }) {
+                        NSWorkspace.shared.open(dir)
+                    } else {
+                        NSSound.beep()
+                    }
+                }
+            } header: {
+                Text(L10n.tr("Captures d'écran", "Screenshots"))
+            } footer: {
+                footnote(L10n.tr("Les captures faites dans Astris. La dernière est aussi dans le menu.",
+                                 "Screenshots taken in Astris. The latest one is also in the menu."))
+            }
+
+            Section {
+                Picker(L10n.tr("Sauvegarde automatique", "Automatic backup"), selection: $settings.autoBackup) {
+                    Text(L10n.tr("Jamais", "Never")).tag(GameSettings.AutoBackup.off)
+                    Text(L10n.tr("À la fermeture d'un jeu", "When a game closes")).tag(GameSettings.AutoBackup.gameClosed)
+                    Text(L10n.tr("Chaque semaine", "Weekly")).tag(GameSettings.AutoBackup.weekly)
+                }
+                HStack {
+                    Button(L10n.tr("Sauvegarder maintenant", "Back Up Now"), action: backUp)
+                        .disabled(working || AstrisFiles.saveDirectory == nil)
+                    Button(L10n.tr("Afficher les sauvegardes", "Show Backups")) {
+                        try? FileManager.default.createDirectory(at: AstrisFiles.backupDirectory, withIntermediateDirectories: true)
+                        NSWorkspace.shared.open(AstrisFiles.backupDirectory)
+                    }
+                    if working { ProgressView().controlSize(.small) }
+                }
+                ForEach(backups.prefix(5), id: \.self) { archive in
+                    HStack {
+                        Text(archive.deletingPathExtension().lastPathComponent).lineLimit(1)
+                        Spacer()
+                        Button(L10n.tr("Restaurer…", "Restore…")) { restoreTarget = archive }
+                            .disabled(working)
+                    }
+                }
+                if let status {
+                    Text(status).foregroundStyle(.secondary)
+                }
+            } header: {
+                Text(L10n.tr("Sauvegardes des jeux", "Game saves"))
+            } footer: {
+                footnote(AstrisFiles.saveDirectory == nil
+                         ? L10n.tr("Dossier des saves d'Astris introuvable.", "Astris' save folder not found.")
+                         : L10n.tr("Zip des saves d'Astris dans ~/Documents/Astris RPC. Les \(AstrisFiles.keptBackups) dernières sont gardées.",
+                                   "Zip of Astris' saves in ~/Documents/Astris RPC. The last \(AstrisFiles.keptBackups) are kept."))
+            }
+
+            Section {
+                HStack {
+                    Button(L10n.tr("Exporter les réglages…", "Export Settings…"), action: exportSettings)
+                    Button(L10n.tr("Importer…", "Import…"), action: pickImport)
+                }
+            } header: {
+                Text(L10n.tr("Réglages", "Settings"))
+            } footer: {
+                footnote(L10n.tr("Un fichier avec tous les réglages, les réglages par jeu, les favoris et l'historique de jeu. Pour changer de Mac.",
+                                 "One file with every setting, per-game settings, favorites and play history. To move to another Mac."))
+            }
+        }
+        .formStyle(.grouped)
+        .frame(width: 500, height: SettingsLayout.height)
+        .onAppear(perform: reloadBackups)
+        .confirmationDialog(L10n.tr("Restaurer cette sauvegarde ?", "Restore this backup?"),
+                            isPresented: Binding(get: { restoreTarget != nil }, set: { if !$0 { restoreTarget = nil } })) {
+            Button(L10n.tr("Restaurer", "Restore"), role: .destructive) { if let restoreTarget { restore(restoreTarget) } }
+        } message: {
+            Text(L10n.tr("Astris doit être fermé. Les saves actuelles sont gardées à côté (« save before restore … »).",
+                         "Astris must be closed. Current saves are kept aside (“save before restore …”)."))
+        }
+        .confirmationDialog(L10n.tr("Remplacer tous les réglages ?", "Replace all settings?"),
+                            isPresented: Binding(get: { confirmImport != nil }, set: { if !$0 { confirmImport = nil } })) {
+            Button(L10n.tr("Importer et relancer", "Import and Relaunch"), role: .destructive) { if let confirmImport { importSettings(confirmImport) } }
+        } message: {
+            Text(L10n.tr("Les réglages et l'historique de ce Mac seront remplacés.", "This Mac's settings and history will be replaced."))
+        }
+    }
+
+    private func footnote(_ text: String) -> some View {
+        Text(text).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func reloadBackups() {
+        backups = AstrisFiles.backups()
+    }
+
+    private func backUp() {
+        working = true
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = Result { try AstrisFiles.backUpSaves() }
+            DispatchQueue.main.async {
+                working = false
+                switch result {
+                case .success(let archive): status = L10n.tr("Sauvegardé : \(archive.lastPathComponent)", "Saved: \(archive.lastPathComponent)")
+                case .failure(let error): status = error.localizedDescription
+                }
+                reloadBackups()
+            }
+        }
+    }
+
+    private func restore(_ archive: URL) {
+        let astrisOpen = NSWorkspace.shared.runningApplications.contains { $0.localizedName?.lowercased() == "astris" }
+        guard !astrisOpen else {
+            status = L10n.tr("Ferme Astris avant de restaurer.", "Quit Astris before restoring.")
+            return
+        }
+        guard let saves = AstrisFiles.saveDirectory ?? AstrisFiles.baseDirectories.first?.appendingPathComponent("bis/user/save") else { return }
+        working = true
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = Result { try AstrisFiles.restore(archive, into: saves) }
+            DispatchQueue.main.async {
+                working = false
+                switch result {
+                case .success: status = L10n.tr("Restauré : \(archive.lastPathComponent)", "Restored: \(archive.lastPathComponent)")
+                case .failure(let error): status = error.localizedDescription
+                }
+                Log.shared.add("Restore \(archive.lastPathComponent): \(status ?? "")")
+            }
+        }
+    }
+
+    private func exportSettings() {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "Astris RPC.\(SettingsTransfer.fileExtension)"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try SettingsTransfer.export(to: url, history: history)
+            status = nil
+        } catch {
+            NSAlert(error: error).runModal()
+        }
+    }
+
+    private func pickImport() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        if panel.runModal() == .OK, let url = panel.url { confirmImport = url }
+    }
+
+    private func importSettings(_ url: URL) {
+        do {
+            _ = try SettingsTransfer.decode(Data(contentsOf: url))
+            history.savingEnabled = false
+            try SettingsTransfer.importFile(url)
+            Relauncher.relaunch()
+        } catch {
+            history.savingEnabled = true
+            NSAlert(error: error).runModal()
         }
     }
 }

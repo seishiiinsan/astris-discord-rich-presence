@@ -409,6 +409,7 @@ final class HotKeysTests: XCTestCase {
         XCTAssertTrue(settings.hotKeysEnabled)
         XCTAssertEqual(HotKeys.keyEquivalent(.toggleDiscord), "d")
         XCTAssertEqual(HotKeys.keyEquivalent(.toggleHideGame), "h")
+        XCTAssertEqual(HotKeys.keyEquivalent(.quickLaunch), "g")
         XCTAssertNotEqual(HotKeys.Action.toggleDiscord.keyCode, HotKeys.Action.toggleHideGame.keyCode)
     }
 }
@@ -633,5 +634,230 @@ final class SteamGridDBTests: XCTestCase {
         XCTAssertEqual(settings.pickCover(switchArt: { "switch" }, steamGridDB: { "sgdb" }), "switch")
         settings.preferSteamGridDB = true
         XCTAssertEqual(settings.pickCover(switchArt: { "switch" }, steamGridDB: { "sgdb" }), "sgdb")
+    }
+}
+
+final class MenuBarTimerTests: XCTestCase {
+    func testClockAndCurrentSession() {
+        XCTAssertEqual(PlayHistory.clock(30), "0:00")
+        XCTAssertEqual(PlayHistory.clock(5 * 60), "0:05")
+        XCTAssertEqual(PlayHistory.clock(84 * 60), "1:24")
+        let history = PlayHistory(file: nil)
+        XCTAssertNil(history.currentSessionStart)
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        history.update(name: "Zelda", titleID: nil, romPath: "/z.nsp", now: t0)
+        XCTAssertEqual(history.currentSessionStart, t0)
+        history.update(name: nil, titleID: nil, romPath: nil, now: t0 + 3)
+        XCTAssertNil(history.currentSessionStart)
+    }
+}
+
+final class PlayRemindersTests: XCTestCase {
+    func testBreak() {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        XCTAssertFalse(PlayReminders.isBreakDue(sessionStart: start, now: start + 7000, everyMinutes: 0, lastReminder: nil), "off")
+        XCTAssertFalse(PlayReminders.isBreakDue(sessionStart: start, now: start + 7100, everyMinutes: 120, lastReminder: nil))
+        XCTAssertTrue(PlayReminders.isBreakDue(sessionStart: start, now: start + 7200, everyMinutes: 120, lastReminder: nil))
+        XCTAssertFalse(PlayReminders.isBreakDue(sessionStart: start, now: start + 8000, everyMinutes: 120, lastReminder: start + 7200))
+        XCTAssertTrue(PlayReminders.isBreakDue(sessionStart: start, now: start + 14400, everyMinutes: 120, lastReminder: start + 7200))
+        XCTAssertTrue(PlayReminders.isBreakDue(sessionStart: start, now: start + 7200, everyMinutes: 120, lastReminder: start - 10), "older session")
+    }
+
+    func testMilestonesAndRecord() {
+        XCTAssertEqual(PlayReminders.crossedMilestone(from: 9.9 * 3600, to: 10 * 3600), 10)
+        XCTAssertNil(PlayReminders.crossedMilestone(from: 10 * 3600, to: 11 * 3600))
+        XCTAssertEqual(PlayReminders.crossedMilestone(from: 0, to: 30 * 3600), 25, "biggest one passed")
+        XCTAssertTrue(PlayReminders.beatsRecord(current: 3601, previousCurrent: 3599, record: 3600))
+        XCTAssertFalse(PlayReminders.beatsRecord(current: 3700, previousCurrent: 3650, record: 3600), "only once")
+        XCTAssertFalse(PlayReminders.beatsRecord(current: 900, previousCurrent: 0, record: 600), "too short")
+    }
+
+    func testMilestoneSentOnce() throws {
+        let settings = GameSettings(defaults: try XCTUnwrap(UserDefaults(suiteName: "AstrisRPCTests-\(UUID().uuidString)")))
+        XCTAssertTrue(settings.markMilestone(10, for: "/g/Zelda.nsp"))
+        XCTAssertFalse(settings.markMilestone(10, for: "/other/Zelda.nsp"))
+        XCTAssertTrue(settings.markMilestone(25, for: "/g/Zelda.nsp"))
+    }
+}
+
+final class ControllersTests: XCTestCase {
+    func testLabelsAndLow() {
+        let low = Controllers.Info(name: "Pro Controller", battery: 0.15, charging: false)
+        XCTAssertEqual(Controllers.label(low), "Pro Controller · 15 %")
+        XCTAssertTrue(Controllers.isLow(low))
+        let charging = Controllers.Info(name: "DualSense", battery: 0.1, charging: true)
+        XCTAssertEqual(Controllers.label(charging), "DualSense · 10 % ⚡︎")
+        XCTAssertFalse(Controllers.isLow(charging))
+        XCTAssertFalse(Controllers.isLow(Controllers.Info(name: "Joy-Con", battery: nil, charging: false)))
+        XCTAssertEqual(Controllers.label(Controllers.Info(name: "Joy-Con", battery: nil, charging: false)), "Joy-Con")
+    }
+}
+
+final class AstrisFilesTests: XCTestCase {
+    private func tempDir() throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    func testLatestScreenshot() throws {
+        let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let old = dir.appendingPathComponent("a.png"), new = dir.appendingPathComponent("b.jpg")
+        FileManager.default.createFile(atPath: old.path, contents: Data([1]))
+        FileManager.default.createFile(atPath: new.path, contents: Data([1]))
+        FileManager.default.createFile(atPath: dir.appendingPathComponent("notes.txt").path, contents: Data([1]))
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1)], ofItemAtPath: old.path)
+        XCTAssertEqual(AstrisFiles.latestScreenshot(in: [dir, dir.appendingPathComponent("missing")])?.url.lastPathComponent, "b.jpg")
+    }
+
+    func testBackupAndRestore() throws {
+        let root = try tempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let saves = root.appendingPathComponent("user/save")
+        try FileManager.default.createDirectory(at: saves.appendingPathComponent("0000000000000001"), withIntermediateDirectories: true)
+        try Data("v1".utf8).write(to: saves.appendingPathComponent("0000000000000001/data"))
+        let backups = root.appendingPathComponent("backups")
+
+        let archive = try AstrisFiles.backUpSaves(from: saves, to: backups, at: Date(timeIntervalSince1970: 1_800_000_000))
+        XCTAssertEqual(AstrisFiles.backups(in: backups).map(\.lastPathComponent), [archive.lastPathComponent])
+        try Data("v2".utf8).write(to: saves.appendingPathComponent("0000000000000001/data"))
+
+        try AstrisFiles.restore(archive, into: saves)
+        XCTAssertEqual(try String(contentsOf: saves.appendingPathComponent("0000000000000001/data")), "v1")
+        let aside = try FileManager.default.contentsOfDirectory(atPath: root.appendingPathComponent("user").path)
+        XCTAssertTrue(aside.contains { $0.hasPrefix("save before restore") }, "current saves kept")
+    }
+
+    func testBackupPruning() throws {
+        let root = try tempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let saves = root.appendingPathComponent("save")
+        try FileManager.default.createDirectory(at: saves, withIntermediateDirectories: true)
+        let backups = root.appendingPathComponent("backups")
+        for i in 0..<(AstrisFiles.keptBackups + 2) {
+            try AstrisFiles.backUpSaves(from: saves, to: backups, at: Date(timeIntervalSince1970: 1_800_000_000 + Double(i)))
+        }
+        XCTAssertEqual(AstrisFiles.backups(in: backups).count, AstrisFiles.keptBackups)
+    }
+}
+
+final class SettingsTransferTests: XCTestCase {
+    func testRoundTrip() throws {
+        let prefs = try JSONEncoder().encode(["Mario.xci": GameSettings.GamePrefs()])
+        let data = try SettingsTransfer.encode(.init(defaults: ["idleMinutes": 5, "gamePrefs": prefs, "favoriteGames": ["/g/a.nsp"]], history: Data("[]".utf8)))
+        let archive = try SettingsTransfer.decode(data)
+        XCTAssertEqual(archive.defaults["idleMinutes"] as? Int, 5)
+        XCTAssertEqual(archive.defaults["gamePrefs"] as? Data, prefs)
+        XCTAssertEqual(archive.defaults["favoriteGames"] as? [String], ["/g/a.nsp"])
+        XCTAssertEqual(archive.history, Data("[]".utf8))
+        XCTAssertThrowsError(try SettingsTransfer.decode(Data("nope".utf8)))
+    }
+}
+
+final class BacklogTests: XCTestCase {
+    func testStatusRatingNotePersist() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "AstrisRPCTests-\(UUID().uuidString)"))
+        let settings = GameSettings(defaults: defaults)
+        settings.setStatus(.playing, for: "/g/Zelda.nsp")
+        settings.setRating(9, for: "/g/Zelda.nsp")
+        settings.setNote("  Temple de l'eau  ", for: "/g/Zelda.nsp")
+        let prefs = GameSettings(defaults: defaults).prefs(for: "/moved/Zelda.nsp")
+        XCTAssertEqual(prefs.status, .playing)
+        XCTAssertEqual(prefs.rating, 5, "clamped")
+        XCTAssertEqual(prefs.note, "Temple de l'eau")
+        L10n.isFrench = true
+        XCTAssertEqual(PlayStatus.completed.label, "100 %")
+    }
+
+    func testUnknownStatusDoesNotBreakPrefs() throws {
+        let data = Data(#"{"Zelda.nsp": {"hidden": true, "status": "someday"}}"#.utf8)
+        let prefs = try JSONDecoder().decode([String: GameSettings.GamePrefs].self, from: data)
+        XCTAssertEqual(prefs["Zelda.nsp"]?.hidden, true)
+        XCTAssertNil(prefs["Zelda.nsp"]?.status)
+    }
+}
+
+final class LibrarySizeTests: XCTestCase {
+    func testDuplicatesAndSize() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        FileManager.default.createFile(atPath: root.appendingPathComponent("Zelda [0100F2C0115B6000].nsp").path, contents: Data(count: 2048))
+        FileManager.default.createFile(atPath: root.appendingPathComponent("Zelda copy [0100F2C0115B6000].xci").path, contents: Data(count: 10))
+        FileManager.default.createFile(atPath: root.appendingPathComponent("Zelda update [0100F2C0115B6800].nsp").path, contents: Data(count: 10))
+        FileManager.default.createFile(atPath: root.appendingPathComponent("Mario.xci").path, contents: Data(count: 10))
+        let games = GameLibrary.scan(root)
+        XCTAssertEqual(games.first { $0.name == "Zelda" }?.size, 2048)
+        let dupes = GameLibrary.duplicates(games)
+        XCTAssertEqual(dupes.count, 2, "the update is not a duplicate")
+        XCTAssertFalse(dupes.contains { $0.hasSuffix("Mario.xci") })
+    }
+}
+
+final class QuickLauncherTests: XCTestCase {
+    private func e(_ path: String, _ name: String) -> LauncherModel.Entry { .init(path: path, name: name, titleID: nil) }
+
+    func testSearchOrderAndMerge() {
+        let entries = LauncherModel.merge([
+            [e("/r/mk.xci", "Mario Kart 8 Deluxe")],
+            [e("/f/zelda.nsp", "The Legend of Zelda"), e("/r/mk.xci", "Mario Kart 8 Deluxe")],
+            [e("/l/smo.xci", "Super Mario Odyssey"), e("/l/z2.nsp", "Zelda Echoes")],
+        ])
+        XCTAssertEqual(entries.map(\.path), ["/r/mk.xci", "/f/zelda.nsp", "/l/smo.xci", "/l/z2.nsp"], "deduped, order kept")
+        XCTAssertEqual(LauncherModel.search("mario", in: entries).map(\.path), ["/r/mk.xci", "/l/smo.xci"])
+        XCTAssertEqual(LauncherModel.search("zelda", in: entries).map(\.path), ["/l/z2.nsp", "/f/zelda.nsp"], "prefix first")
+        XCTAssertEqual(LauncherModel.search("", in: entries).count, 4)
+        XCTAssertTrue(LauncherModel.search("kirby", in: entries).isEmpty)
+    }
+
+    func testSelectionWraps() {
+        let model = LauncherModel()
+        model.entries = [e("/a", "A"), e("/b", "B")]
+        model.move(-1)
+        XCTAssertEqual(model.selected, 1)
+        model.move(1)
+        XCTAssertEqual(model.selected, 0)
+        model.query = "b"
+        XCTAssertEqual(model.selected, 0, "typing resets the selection")
+    }
+}
+
+final class GameUpdatesTests: XCTestCase {
+    func testBuildParsing() {
+        XCTAssertEqual(GameDetector.buildNumber(in: "Zelda [0100F2C0115B6800][v196608]"), 196608)
+        XCTAssertNil(GameDetector.buildNumber(in: "Zelda [v1.2.0]"))
+        XCTAssertEqual(GameUpdates.build(in: ["version": NSNumber(value: 393216)]), 393216)
+        XCTAssertEqual(GameUpdates.build(in: ["version": "131072"]), 131072)
+        XCTAssertNil(GameUpdates.build(in: ["version": "1.2.0"]))
+        L10n.isFrench = false
+        XCTAssertEqual(GameUpdates.label(196608), "update 3")
+        XCTAssertEqual(GameUpdates.label(5), "v5")
+    }
+
+    func testNewerBuildFromStore() {
+        let store = DiskStore(file: nil, foundLifetime: 86400, missingLifetime: 86400)
+        store.set("393216", for: "0100F2C0115B6000")
+        let updates = GameUpdates(store: store)
+        updates.check("0100F2C0115B6800")
+        XCTAssertEqual(updates.newerBuild(titleID: "0100F2C0115B6000", installed: 196608), 393216)
+        XCTAssertNil(updates.newerBuild(titleID: "0100F2C0115B6000", installed: 393216))
+        XCTAssertEqual(updates.newerBuild(titleID: "0100F2C0115B6000", installed: nil), 393216, "no update installed")
+    }
+}
+
+final class HelpTests: XCTestCase {
+    func testSectionsAndSearch() {
+        L10n.isFrench = true
+        let sections = HelpContent.sections
+        XCTAssertGreaterThanOrEqual(sections.count, 8)
+        XCTAssertTrue(sections.allSatisfy { !$0.items.isEmpty })
+        let ids = sections.flatMap { s in s.items.map { s.title + "/" + $0.title } }
+        XCTAssertEqual(ids.count, Set(ids).count, "unique ids")
+        let found = HelpContent.filtered("streamer")
+        XCTAssertFalse(found.isEmpty)
+        XCTAssertTrue(found.flatMap(\.items).allSatisfy { $0.title.localizedCaseInsensitiveContains("streamer") || $0.text.localizedCaseInsensitiveContains("streamer") })
+        XCTAssertTrue(HelpContent.filtered("zzzz").isEmpty)
+        XCTAssertEqual(HelpContent.filtered("").count, sections.count)
     }
 }

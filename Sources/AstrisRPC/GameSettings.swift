@@ -1,5 +1,28 @@
 import Foundation
 
+/// Where a game is in the player's backlog.
+enum PlayStatus: String, Codable, CaseIterable {
+    case backlog, playing, finished, completed
+
+    var label: String {
+        switch self {
+        case .backlog: return L10n.tr("À faire", "Backlog")
+        case .playing: return L10n.tr("En cours", "Playing")
+        case .finished: return L10n.tr("Terminé", "Finished")
+        case .completed: return "100 %"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .backlog: return "tray"
+        case .playing: return "play.circle"
+        case .finished: return "checkmark.circle"
+        case .completed: return "star.circle.fill"
+        }
+    }
+}
+
 /// User preferences shared by the menu, the presence and the Settings window.
 /// Per-game settings are keyed by ROM file name, so they survive moving the games folder.
 final class GameSettings: ObservableObject {
@@ -12,6 +35,10 @@ final class GameSettings: ObservableObject {
         var detailsTemplate: String?
         var stateTemplate: String?
         var hidePlayedTime = false
+        /// Backlog: status, 1–5 stars, free note.
+        var status: PlayStatus?
+        var rating: Int?
+        var note: String?
 
         init() {}
 
@@ -24,6 +51,9 @@ final class GameSettings: ObservableObject {
             detailsTemplate = try c.decodeIfPresent(String.self, forKey: .detailsTemplate)
             stateTemplate = try c.decodeIfPresent(String.self, forKey: .stateTemplate)
             hidePlayedTime = try c.decodeIfPresent(Bool.self, forKey: .hidePlayedTime) ?? false
+            status = try? c.decodeIfPresent(PlayStatus.self, forKey: .status)
+            rating = try c.decodeIfPresent(Int.self, forKey: .rating)
+            note = try c.decodeIfPresent(String.self, forKey: .note)
         }
     }
 
@@ -47,6 +77,16 @@ final class GameSettings: ObservableObject {
     private static let hotKeysKey = "hotKeys"
     private static let importedFavoritesKey = "importedAstrisFavorites"
     private static let streamerKey = "streamerMode"
+    private static let menuBarTimerKey = "menuBarTimer"
+    private static let breakKey = "breakReminderMinutes"
+    private static let lowBatteryKey = "notifyLowBattery"
+    private static let autoBackupKey = "autoBackup"
+    private static let screenshotNotifyKey = "notifyScreenshots"
+    private static let screenshotCopyKey = "copyScreenshots"
+
+    enum AutoBackup: String, CaseIterable { case off, gameClosed, weekly }
+    private static let milestonesKey = "notifyMilestones"
+    private static let milestonesSentKey = "milestonesSent"
     private static let steamGridDBKeyKey = "steamGridDBKey"
     private static let preferSteamGridDBKey = "preferSteamGridDB"
     private static let notifyDiscordKey = "notifyDiscordLost"
@@ -167,6 +207,45 @@ final class GameSettings: ObservableObject {
         return preferSteamGridDB ? steamGridDB() ?? switchArt() : switchArt() ?? steamGridDB()
     }
 
+    /// Session time next to the menu bar icon.
+    @Published var menuBarTimer: Bool {
+        didSet { defaults.set(menuBarTimer, forKey: Self.menuBarTimerKey) }
+    }
+
+    /// "You've been playing for 2 h" every this many minutes (0: off).
+    @Published var breakReminderMinutes: Int {
+        didSet { defaults.set(breakReminderMinutes, forKey: Self.breakKey) }
+    }
+
+    @Published var autoBackup: AutoBackup {
+        didSet { defaults.set(autoBackup.rawValue, forKey: Self.autoBackupKey) }
+    }
+
+    @Published var notifyScreenshots: Bool {
+        didSet { defaults.set(notifyScreenshots, forKey: Self.screenshotNotifyKey) }
+    }
+
+    /// Put each new screenshot on the clipboard.
+    @Published var copyScreenshots: Bool {
+        didSet { defaults.set(copyScreenshots, forKey: Self.screenshotCopyKey) }
+    }
+
+    @Published var notifyLowBattery: Bool {
+        didSet { defaults.set(notifyLowBattery, forKey: Self.lowBatteryKey) }
+    }
+
+    @Published var notifyMilestones: Bool {
+        didSet { defaults.set(notifyMilestones, forKey: Self.milestonesKey) }
+    }
+
+    /// "Zelda.nsp:50": each milestone notified once per game.
+    func markMilestone(_ hours: Int, for romPath: String) -> Bool {
+        var sent = Set(defaults.stringArray(forKey: Self.milestonesSentKey) ?? [])
+        let inserted = sent.insert("\(Self.key(for: romPath)):\(hours)").inserted
+        if inserted { defaults.set(Array(sent).sorted(), forKey: Self.milestonesSentKey) }
+        return inserted
+    }
+
     @Published var notifyDiscordLost: Bool {
         didSet { defaults.set(notifyDiscordLost, forKey: Self.notifyDiscordKey) }
     }
@@ -237,6 +316,13 @@ final class GameSettings: ObservableObject {
         importedFavorites = Set(defaults.stringArray(forKey: Self.importedFavoritesKey) ?? [])
         hotKeysEnabled = defaults.object(forKey: Self.hotKeysKey) as? Bool ?? true
         streamerMode = defaults.bool(forKey: Self.streamerKey)
+        menuBarTimer = defaults.bool(forKey: Self.menuBarTimerKey)
+        breakReminderMinutes = defaults.object(forKey: Self.breakKey) as? Int ?? 0
+        notifyMilestones = defaults.object(forKey: Self.milestonesKey) as? Bool ?? true
+        notifyLowBattery = defaults.object(forKey: Self.lowBatteryKey) as? Bool ?? true
+        autoBackup = AutoBackup(rawValue: defaults.string(forKey: Self.autoBackupKey) ?? "") ?? .weekly
+        notifyScreenshots = defaults.object(forKey: Self.screenshotNotifyKey) as? Bool ?? true
+        copyScreenshots = defaults.bool(forKey: Self.screenshotCopyKey)
         steamGridDBKey = defaults.string(forKey: Self.steamGridDBKeyKey)
         preferSteamGridDB = defaults.bool(forKey: Self.preferSteamGridDBKey)
         notifyDiscordLost = defaults.object(forKey: Self.notifyDiscordKey) as? Bool ?? true
@@ -280,6 +366,19 @@ final class GameSettings: ObservableObject {
     func setCustomName(_ name: String?, for romPath: String) {
         let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines)
         update(romPath) { $0.customName = (trimmed?.isEmpty ?? true) ? nil : trimmed }
+    }
+
+    func setStatus(_ status: PlayStatus?, for romPath: String) {
+        update(romPath) { $0.status = status }
+    }
+
+    func setRating(_ rating: Int?, for romPath: String) {
+        update(romPath) { $0.rating = rating.map { min(5, max(1, $0)) } }
+    }
+
+    func setNote(_ note: String?, for romPath: String) {
+        let trimmed = note?.trimmingCharacters(in: .whitespacesAndNewlines)
+        update(romPath) { $0.note = (trimmed?.isEmpty ?? true) ? nil : trimmed }
     }
 
     /// Lines for this game: its own, else the global ones (nil: default).
