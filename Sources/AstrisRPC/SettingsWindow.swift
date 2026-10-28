@@ -84,9 +84,10 @@ enum FolderPicker {
         return panel.runModal() == .OK ? panel.url : nil
     }
 
-    /// Folder of the last game seen running, offered when no folder is set yet.
+    /// Astris' own games folder, else the folder of the last game seen running.
     static func suggestion(from recents: RecentGames) -> URL? {
-        recents.entries.first.map { URL(fileURLWithPath: $0.romPath).deletingLastPathComponent() }
+        AstrisConfig.load()?.existingGameDirectories.first
+            ?? recents.entries.first.map { URL(fileURLWithPath: $0.romPath).deletingLastPathComponent() }
     }
 
     static func abbreviated(_ url: URL) -> String {

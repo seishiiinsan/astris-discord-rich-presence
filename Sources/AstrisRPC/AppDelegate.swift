@@ -86,6 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         center.addObserver(self, selector: #selector(appTerminated(_:)),
                            name: NSWorkspace.didTerminateApplicationNotification, object: nil)
         astris = NSWorkspace.shared.runningApplications.first(where: isAstris)
+        adoptAstrisGamesFolder()
         astrisChanged()
         checkUpdates(manual: false)
         updateTimer = Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { [weak self] _ in
@@ -99,6 +100,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if discord.isConnected { _ = discord.setActivity(nil) }
             discord.disconnect()
         }
+    }
+
+    /// No folder chosen yet: use the one set in Astris.
+    private func adoptAstrisGamesFolder() {
+        guard settings.gamesFolder == nil, let folder = AstrisConfig.load()?.existingGameDirectories.first else { return }
+        settings.gamesFolder = folder
+        Log.shared.add("Games folder taken from Astris: \(FolderPicker.abbreviated(folder))")
     }
 
     // MARK: - Loop

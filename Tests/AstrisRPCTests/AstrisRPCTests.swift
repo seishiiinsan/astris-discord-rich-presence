@@ -429,3 +429,23 @@ final class LanguageTests: XCTestCase {
         XCTAssertEqual(GameSettings(defaults: defaults).language, .english)
     }
 }
+
+final class AstrisConfigTests: XCTestCase {
+    func testParse() throws {
+        let json = #"{"game_dirs": ["/Volumes/Switch", ""], "docked_mode": false, "multiplayer_mode": "LdnMitm"}"#
+        let config = try XCTUnwrap(AstrisConfig.parse(Data(json.utf8)))
+        XCTAssertEqual(config.gameDirectories.map(\.path), ["/Volumes/Switch"])
+        XCTAssertEqual(config.docked, false)
+        XCTAssertTrue(config.multiplayer)
+    }
+
+    func testMultiplayerVariants() throws {
+        XCTAssertFalse(try XCTUnwrap(AstrisConfig.parse(Data(#"{"multiplayer_mode": "Disabled"}"#.utf8))).multiplayer)
+        XCTAssertFalse(try XCTUnwrap(AstrisConfig.parse(Data(#"{"multiplayer_mode": 0}"#.utf8))).multiplayer)
+        XCTAssertTrue(try XCTUnwrap(AstrisConfig.parse(Data(#"{"multiplayer_mode": 1}"#.utf8))).multiplayer)
+        let empty = try XCTUnwrap(AstrisConfig.parse(Data("{}".utf8)))
+        XCTAssertNil(empty.docked)
+        XCTAssertFalse(empty.multiplayer)
+        XCTAssertNil(AstrisConfig.parse(Data("nope".utf8)))
+    }
+}
