@@ -149,17 +149,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     buttons: [("Astris", Self.astrisURL)])
             } else if let game = detector.game {
                 let name = detector.romPath.map { settings.displayName(for: $0, detected: game.name) } ?? game.name
-                let played = game.playedTime.flatMap(Self.formatPlayed)
+                let values: [String: String?] = [
+                    "game": name,
+                    "played": game.playedTime.flatMap(Self.formatPlayed),
+                ]
+                var buttons: [(label: String, url: String)] = []
+                if settings.showEShopButton {
+                    buttons.append((L10n.tr("Voir sur l'eShop", "View on eShop"), eShop.url(titleID: game.titleID, name: game.name)))
+                }
+                buttons.append(settings.customButton ?? ("Astris", Self.astrisURL))
                 presence = Presence(
-                    details: name,
-                    state: played.map { L10n.tr("Sur Astris · \($0) jouées", "On Astris · \($0) played") } ?? L10n.tr("Sur Astris", "On Astris"),
+                    details: PresenceTemplate.render(Self.template(settings.detailsTemplate, PresenceTemplate.defaultDetails), values: values) ?? name,
+                    state: PresenceTemplate.render(Self.template(settings.stateTemplate, PresenceTemplate.defaultState), values: values),
                     start: game.start,
                     image: game.titleID.flatMap(covers.cover(for:)) ?? Self.astrisLogo,
                     imageText: name,
-                    buttons: [
-                        (L10n.tr("Voir sur l'eShop", "View on eShop"), eShop.url(titleID: game.titleID, name: game.name)),
-                        ("Astris", Self.astrisURL),
-                    ])
+                    buttons: buttons)
             } else {
                 presence = Presence(
                     details: L10n.tr("Dans le menu", "In the menu"), state: L10n.tr("Sur Astris", "On Astris"), start: astris.launchDate,
@@ -180,6 +185,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         lastPresence = presence
         push(presence)
         refreshMenu(astrisRunning: astris != nil)
+    }
+
+    private static func template(_ custom: String?, _ fallback: String) -> String {
+        guard let custom, !custom.trimmingCharacters(in: .whitespaces).isEmpty else { return fallback }
+        return custom
     }
 
     /// "45 min", "12 h"

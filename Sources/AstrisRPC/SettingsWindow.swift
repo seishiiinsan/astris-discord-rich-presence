@@ -9,21 +9,28 @@ final class SettingsWindowController: NSWindowController {
         tabs.tabStyle = .toolbar
 
         let general = NSHostingController(rootView: GeneralSettingsView(settings: settings, recents: recents))
+        let discord = NSHostingController(rootView: DiscordSettingsView(settings: settings))
         let games = NSHostingController(rootView: GamesSettingsView(settings: settings, covers: covers, recents: recents))
         general.sizingOptions = .preferredContentSize
+        discord.sizingOptions = .preferredContentSize
         games.sizingOptions = .preferredContentSize
 
         // The window title follows the selected tab.
         general.title = L10n.tr("Général", "General")
+        discord.title = "Discord"
         games.title = L10n.tr("Jeux", "Games")
 
         let generalItem = NSTabViewItem(viewController: general)
         generalItem.label = L10n.tr("Général", "General")
         generalItem.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: nil)
+        let discordItem = NSTabViewItem(viewController: discord)
+        discordItem.label = "Discord"
+        discordItem.image = NSImage(systemSymbolName: "text.bubble", accessibilityDescription: nil)
         let gamesItem = NSTabViewItem(viewController: games)
         gamesItem.label = L10n.tr("Jeux", "Games")
         gamesItem.image = NSImage(systemSymbolName: "gamecontroller", accessibilityDescription: nil)
         tabs.addTabViewItem(generalItem)
+        tabs.addTabViewItem(discordItem)
         tabs.addTabViewItem(gamesItem)
 
         let window = NSWindow(contentViewController: tabs)
@@ -157,6 +164,57 @@ struct GeneralSettingsView: View {
             NSAlert(error: error).runModal()
         }
         openAtLogin = SMAppService.mainApp.status == .enabled
+    }
+}
+
+// MARK: - Discord
+
+struct DiscordSettingsView: View {
+    @ObservedObject var settings: GameSettings
+
+    var body: some View {
+        Form {
+            Section {
+                TextField(L10n.tr("Ligne 1", "Line 1"), text: optional(\.detailsTemplate), prompt: Text(PresenceTemplate.defaultDetails))
+                TextField(L10n.tr("Ligne 2", "Line 2"), text: optional(\.stateTemplate), prompt: Text(PresenceTemplate.defaultState))
+            } header: {
+                Text(L10n.tr("Texte", "Text"))
+            } footer: {
+                Text(L10n.tr(
+                    "Variables : {game} nom du jeu, {played} temps déjà joué, {version} version du jeu. Une partie « · » dont la variable est inconnue est retirée. Vide : texte par défaut.",
+                    "Variables: {game} game name, {played} time already played, {version} game version. A “ · ” part whose variable is unknown is left out. Empty: default text."))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Section {
+                Toggle(L10n.tr("Bouton « Voir sur l'eShop »", "“View on eShop” button"), isOn: $settings.showEShopButton)
+                TextField(L10n.tr("Libellé", "Label"), text: optional(\.customButtonLabel), prompt: Text("Astris"))
+                TextField("URL", text: optional(\.customButtonURL), prompt: Text("https://…"))
+                if settings.customButtonLabel != nil || settings.customButtonURL != nil, settings.customButton == nil {
+                    Label(L10n.tr("Il faut un libellé et une adresse https://", "Needs a label and an https:// address"),
+                          systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                }
+            } header: {
+                Text(L10n.tr("Boutons", "Buttons"))
+            } footer: {
+                Text(L10n.tr(
+                    "Le second bouton mène à Astris, ou à ton lien s'il est rempli. Discord n'affiche pas les boutons sur ton propre profil, seulement aux autres.",
+                    "The second button links to Astris, or to your link when set. Discord hides buttons on your own profile, others see them."))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .formStyle(.grouped)
+        .frame(width: 500)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func optional(_ key: ReferenceWritableKeyPath<GameSettings, String?>) -> Binding<String> {
+        Binding(
+            get: { settings[keyPath: key] ?? "" },
+            set: { settings[keyPath: key] = $0.isEmpty ? nil : $0 })
     }
 }
 

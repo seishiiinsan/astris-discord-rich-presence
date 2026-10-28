@@ -19,6 +19,12 @@ final class GameSettings: ObservableObject {
 
     static let idleChoices = [0, 5, 10, 15, 30]
 
+    private static let detailsKey = "detailsTemplate"
+    private static let stateKey = "stateTemplate"
+    private static let eShopButtonKey = "eShopButton"
+    private static let buttonLabelKey = "customButtonLabel"
+    private static let buttonURLKey = "customButtonURL"
+
     private let defaults: UserDefaults
 
     @Published var showOnDiscord: Bool {
@@ -36,6 +42,38 @@ final class GameSettings: ObservableObject {
     /// Show "Idle" on Discord after this many minutes without input (0: never).
     @Published var idleMinutes: Int {
         didSet { defaults.set(idleMinutes, forKey: Self.idleKey) }
+    }
+
+    /// Presence lines (nil: defaults, see `PresenceTemplate`).
+    @Published var detailsTemplate: String? {
+        didSet { Self.store(detailsTemplate, Self.detailsKey, in: defaults) }
+    }
+
+    @Published var stateTemplate: String? {
+        didSet { Self.store(stateTemplate, Self.stateKey, in: defaults) }
+    }
+
+    @Published var showEShopButton: Bool {
+        didSet { defaults.set(showEShopButton, forKey: Self.eShopButtonKey) }
+    }
+
+    /// Replaces the "Astris" button when both are set.
+    @Published var customButtonLabel: String? {
+        didSet { Self.store(customButtonLabel, Self.buttonLabelKey, in: defaults) }
+    }
+
+    @Published var customButtonURL: String? {
+        didSet { Self.store(customButtonURL, Self.buttonURLKey, in: defaults) }
+    }
+
+    var customButton: (label: String, url: String)? {
+        guard let label = customButtonLabel, let url = customButtonURL, Presence.isWebURL(url, max: 512) else { return nil }
+        return (label, url)
+    }
+
+    private static func store(_ value: String?, _ key: String, in defaults: UserDefaults) {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let trimmed, !trimmed.isEmpty { defaults.set(trimmed, forKey: key) } else { defaults.removeObject(forKey: key) }
     }
 
     @Published var gamesFolder: URL? {
@@ -59,6 +97,11 @@ final class GameSettings: ObservableObject {
         gamesFolder = defaults.string(forKey: Self.folderKey).map { URL(fileURLWithPath: $0) }
         writeLog = defaults.bool(forKey: Self.logKey)
         idleMinutes = defaults.object(forKey: Self.idleKey) as? Int ?? 15
+        detailsTemplate = defaults.string(forKey: Self.detailsKey)
+        stateTemplate = defaults.string(forKey: Self.stateKey)
+        showEShopButton = defaults.object(forKey: Self.eShopButtonKey) as? Bool ?? true
+        customButtonLabel = defaults.string(forKey: Self.buttonLabelKey)
+        customButtonURL = defaults.string(forKey: Self.buttonURLKey)
         prefs = defaults.data(forKey: Self.prefsKey)
             .flatMap { try? JSONDecoder().decode([String: GamePrefs].self, from: $0) } ?? [:]
         knownTitleIDs = defaults.dictionary(forKey: Self.titleIDsKey) as? [String: String] ?? [:]

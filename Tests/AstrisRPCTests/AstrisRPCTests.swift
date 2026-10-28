@@ -272,3 +272,24 @@ final class IdleTests: XCTestCase {
         XCTAssertEqual(GameSettings(defaults: defaults).idleMinutes, 15)
     }
 }
+
+final class PresenceTemplateTests: XCTestCase {
+    func testRenderDropsPartsWithoutValue() {
+        XCTAssertEqual(PresenceTemplate.render("Sur Astris · {played} jouées", values: ["played": "12 h"]), "Sur Astris · 12 h jouées")
+        XCTAssertEqual(PresenceTemplate.render("Sur Astris · {played} jouées", values: ["played": nil]), "Sur Astris")
+        XCTAssertEqual(PresenceTemplate.render("{game} · {version}", values: ["game": "Zelda", "version": ""]), "Zelda")
+        XCTAssertNil(PresenceTemplate.render("{played}", values: ["played": nil]))
+        XCTAssertEqual(PresenceTemplate.render("Hello {unknown}", values: [:]), "Hello {unknown}", "unknown tokens stay as typed")
+    }
+
+    func testCustomButtonNeedsLabelAndWebURL() throws {
+        let settings = GameSettings(defaults: try XCTUnwrap(UserDefaults(suiteName: "AstrisRPCTests-\(UUID().uuidString)")))
+        XCTAssertTrue(settings.showEShopButton)
+        settings.customButtonLabel = "Mon stream"
+        XCTAssertNil(settings.customButton)
+        settings.customButtonURL = "twitch.tv/moi"
+        XCTAssertNil(settings.customButton)
+        settings.customButtonURL = "https://twitch.tv/moi"
+        XCTAssertEqual(settings.customButton?.url, "https://twitch.tv/moi")
+    }
+}
