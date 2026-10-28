@@ -58,7 +58,7 @@ L'app vérifie les releases GitHub au lancement puis toutes les 6 h. L'alerte af
 - **Cache** : jaquettes et liens eShop trouvés gardés 30 jours, absences 3 jours (`~/Library/Caches/AstrisRPC`), images téléchargées une seule fois.
 - **Version** : mise à jour choisie dans Astris (`games/<TitleID>/updates.json`) ou nom du fichier (`[v1.2.0]`, `[v196608]` → màj 3).
 - **Pause** : dernière entrée clavier/souris (`CGEventSource`) ou manette (`GameController`, en arrière-plan). Aucune permission requise.
-- **Raccourcis** : hot keys Carbon, sans permission Accessibilité. Désactivables si un autre app les utilise.
+- **Raccourcis** : hot keys Carbon, sans permission Accessibilité. Désactivables si une autre app les utilise.
 - **Limites Discord** : textes coupés à 128 caractères (libellés de bouton : 32), boutons sans https retirés.
 - **Discord** : socket local `discord-ipc-N`, Client ID dans `AppDelegate.swift`. Discord fermé : nouvel essai après 3 s, 6 s… jusqu'à 60 s, immédiat dès que Discord se relance.
 - **Logo Astris** : `Resources/AstrisLogo.png` servi via raw.githubusercontent (repo public requis).
