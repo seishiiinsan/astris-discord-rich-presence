@@ -9,7 +9,11 @@ final class GameDetector {
         let start: Date
         /// Total time played before this session, from Astris' metadata.
         let playedTime: TimeInterval?
+        /// "1.2.0", from the update selected in Astris or the ROM's file name.
+        var version: String? = nil
     }
+
+    enum TitleKind: Equatable { case base, update, dlc }
 
     private static let romExtensions: Set<String> = ["xci", "xcz", "nsp", "nsz", "nro"]
     private static let titleIDRegex = try! NSRegularExpression(pattern: #"\[?(01[0-9A-Fa-f]{14})\]?"#)
@@ -114,11 +118,26 @@ final class GameDetector {
         let title = (metadata?["title"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         let start = (metadata?["last_played_utc"] as? String).flatMap(Self.parseDate)
             ?? metadataDate ?? Date()
+        let selectedUpdate = titleID.flatMap(selectedUpdate(for:))
         return Game(
             name: title ?? Self.cleanName(fileName),
             titleID: titleID?.uppercased(),
             start: min(start, Date()),
-            playedTime: Self.parsePlayed(metadata?["timespan_played"] ?? metadata?["time_played"]))
+            playedTime: Self.parsePlayed(metadata?["timespan_played"] ?? metadata?["time_played"]),
+            version: selectedUpdate.flatMap { Self.version(in: ($0 as NSString).lastPathComponent) } ?? Self.version(in: fileName))
+    }
+
+    /// Update file chosen in Astris (`games/<TitleID>/updates.json`, "selected").
+    private func selectedUpdate(for titleID: String) -> String? {
+        for dir in gamesDirectories {
+            let file = dir.appendingPathComponent("\(titleID.lowercased())/updates.json")
+            guard let data = try? Data(contentsOf: file),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let selected = json["selected"] as? String, !selected.isEmpty
+            else { continue }
+            return selected
+        }
+        return nil
     }
 
     // MARK: - Metadata
@@ -201,6 +220,39 @@ final class GameDetector {
         guard let m = titleIDRegex.firstMatch(in: text, range: range),
               let r = Range(m.range(at: 1), in: text) else { return nil }
         return String(text[r])
+    }
+
+    private static let versionRegex = try! NSRegularExpression(pattern: #"(?:^|[\s\[\(_])v(\d+(?:\.\d+){0,3})(?=$|[\s\]\)_])"#, options: .caseInsensitive)
+
+    /// "Mario [v1.2.0]" -> "1.2.0"; "Mario [v196608]" (Switch build number, 65536 per update) -> "update 3".
+    static func version(in fileName: String) -> String? {
+        let range = NSRange(fileName.startIndex..., in: fileName)
+        guard let m = versionRegex.firstMatch(in: fileName, range: range),
+              let r = Range(m.range(at: 1), in: fileName) else { return nil }
+        let raw = String(fileName[r])
+        if raw.contains(".") { return raw }
+        guard let n = Int(raw), n > 0 else { return nil }
+        if n % 65536 == 0 { return L10n.tr("màj \(n / 65536)", "update \(n / 65536)") }
+        return nil
+    }
+
+    /// Base games end in 000, updates in 800, DLC in anything else.
+    static func kind(of titleID: String) -> TitleKind? {
+        guard titleID.count == 16, let value = UInt64(titleID, radix: 16) else { return nil }
+        switch value & 0xFFF {
+        case 0: return .base
+        case 0x800: return .update
+        default: return .dlc
+        }
+    }
+
+    /// TitleID of the base game of an update or a DLC.
+    static func baseTitleID(of titleID: String) -> String {
+        guard let value = UInt64(titleID, radix: 16), let kind = kind(of: titleID) else { return titleID }
+        // DLC ids sit one "slot" (0x1000) above their base game.
+        let base = kind == .dlc ? (value & ~0xFFF) &- 0x1000 : value & ~0xFFF
+        let hex = String(base, radix: 16, uppercase: true)
+        return String(repeating: "0", count: max(0, 16 - hex.count)) + hex
     }
 
     /// "Super_Mario [0100...][v0] (EU)" -> "Super Mario"

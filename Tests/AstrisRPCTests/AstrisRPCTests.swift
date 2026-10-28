@@ -188,3 +188,227 @@ final class TitleMatchingTests: XCTestCase {
         XCTAssertEqual(GameSettings(defaults: defaults).knownTitleIDs["Game.xci"], "0100AAA")
     }
 }
+
+final class PresenceLimitsTests: XCTestCase {
+    func testFieldLengths() {
+        XCTAssertEqual(Presence.field("A").count, 2, "Discord needs 2 characters")
+        XCTAssertEqual(Presence.field("  Zelda  "), "Zelda")
+        let long = Presence.field(String(repeating: "x", count: 200))
+        XCTAssertEqual(long.count, 128)
+        XCTAssertTrue(long.hasSuffix("…"))
+        XCTAssertEqual(Presence.field("Un très long libellé de bouton ici", max: 32).count, 32)
+    }
+
+    func testInvalidButtonsAndImageAreDropped() {
+        let p = Presence(details: "Mario", image: "not a url", buttons: [
+            ("Ok", "https://example.com"), ("", "https://example.com"), ("Bad", "ftp://x"), ("Two", "http://b.c"),
+        ])
+        let a = p.activity
+        XCTAssertNil(a["assets"])
+        let buttons = a["buttons"] as? [[String: String]]
+        XCTAssertEqual(buttons?.map { $0["label"] }, ["Ok", "Two"])
+    }
+
+    func testDiscordErrorReply() {
+        XCTAssertEqual(DiscordIPC.reply(from: ["evt": NSNull(), "cmd": "SET_ACTIVITY"]), .ok)
+        let error: [String: Any] = ["evt": "ERROR", "data": ["code": NSNumber(value: 4000), "message": "child \"activity\" fails"]]
+        XCTAssertEqual(DiscordIPC.reply(from: error), .rejected("child \"activity\" fails (4000)"))
+    }
+}
+
+final class DiskCacheTests: XCTestCase {
+    func testStorePersistsAndExpires() {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let now = Date()
+        let store = DiskStore(file: file)
+        XCTAssertFalse(store.lookup("A").hit)
+        store.set("https://x/a.png", for: "A", now: now)
+        store.set(nil, for: "B", now: now)
+
+        let reloaded = DiskStore(file: file)
+        XCTAssertEqual(reloaded.lookup("A", now: now).value, "https://x/a.png")
+        XCTAssertTrue(reloaded.lookup("B", now: now).hit, "a known miss is a hit")
+        XCTAssertNil(reloaded.lookup("B", now: now).value)
+        XCTAssertFalse(reloaded.lookup("B", now: now.addingTimeInterval(DiskStore.missingLifetime + 1)).hit, "misses expire first")
+        XCTAssertTrue(reloaded.lookup("A", now: now.addingTimeInterval(DiskStore.missingLifetime + 1)).hit)
+    }
+
+    func testCoverResolverUsesStore() {
+        let store = DiskStore(file: nil)
+        store.set("https://x/cover.png", for: "0100EA80032EA000")
+        XCTAssertEqual(CoverResolver(store: store).cover(for: "0100EA80032EA000"), "https://x/cover.png")
+    }
+
+    func testImageFileNameIsStable() {
+        XCTAssertEqual(ImageCache.fileName(for: "a"), ImageCache.fileName(for: "a"))
+        XCTAssertNotEqual(ImageCache.fileName(for: "a"), ImageCache.fileName(for: "b"))
+        XCTAssertEqual(ImageCache.fileName(for: "a").count, 64)
+    }
+}
+
+final class LogTests: XCTestCase {
+    func testKeepsRecentLinesWithoutRepeats() {
+        let log = Log()
+        log.add("a")
+        log.add("a")
+        log.add("b")
+        XCTAssertEqual(log.recent.count, 2)
+        XCTAssertTrue(log.recent[1].hasSuffix("  b"))
+        for i in 0..<(Log.limit + 10) { log.add("line \(i)") }
+        XCTAssertEqual(log.recent.count, Log.limit)
+    }
+}
+
+final class IdleTests: XCTestCase {
+    func testIsIdle() {
+        XCTAssertFalse(IdleMonitor.isIdle(idleTime: 3600, afterMinutes: 0), "0 = never")
+        XCTAssertFalse(IdleMonitor.isIdle(idleTime: 299, afterMinutes: 5))
+        XCTAssertTrue(IdleMonitor.isIdle(idleTime: 300, afterMinutes: 5))
+    }
+
+    func testIdleDefaultsTo15Minutes() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "AstrisRPCTests-\(UUID().uuidString)"))
+        XCTAssertEqual(GameSettings(defaults: defaults).idleMinutes, 15)
+    }
+}
+
+final class PresenceTemplateTests: XCTestCase {
+    func testRenderDropsPartsWithoutValue() {
+        XCTAssertEqual(PresenceTemplate.render("Sur Astris · {played} jouées", values: ["played": "12 h"]), "Sur Astris · 12 h jouées")
+        XCTAssertEqual(PresenceTemplate.render("Sur Astris · {played} jouées", values: ["played": nil]), "Sur Astris")
+        XCTAssertEqual(PresenceTemplate.render("{game} · {version}", values: ["game": "Zelda", "version": ""]), "Zelda")
+        XCTAssertNil(PresenceTemplate.render("{played}", values: ["played": nil]))
+        XCTAssertEqual(PresenceTemplate.render("Hello {unknown}", values: [:]), "Hello {unknown}", "unknown tokens stay as typed")
+    }
+
+    func testCustomButtonNeedsLabelAndWebURL() throws {
+        let settings = GameSettings(defaults: try XCTUnwrap(UserDefaults(suiteName: "AstrisRPCTests-\(UUID().uuidString)")))
+        XCTAssertTrue(settings.showEShopButton)
+        settings.customButtonLabel = "Mon stream"
+        XCTAssertNil(settings.customButton)
+        settings.customButtonURL = "twitch.tv/moi"
+        XCTAssertNil(settings.customButton)
+        settings.customButtonURL = "https://twitch.tv/moi"
+        XCTAssertEqual(settings.customButton?.url, "https://twitch.tv/moi")
+    }
+}
+
+final class PlayHistoryTests: XCTestCase {
+    func testSessionsSplitOnGapsAndGameChanges() {
+        let history = PlayHistory(file: nil)
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        for i in 0...20 { history.update(name: "Mario", titleID: "0100A", romPath: "/g/Mario.xci", now: t0 + Double(i * 3)) }
+        XCTAssertEqual(history.sessions.count, 1)
+        XCTAssertEqual(history.sessions[0].duration, 60)
+
+        history.update(name: "Mario", titleID: "0100A", romPath: "/g/Mario.xci", now: t0 + 600)
+        XCTAssertEqual(history.sessions.count, 2, "long gap: new session")
+        history.update(name: "Zelda", titleID: nil, romPath: "/g/Zelda.nsp", now: t0 + 603)
+        XCTAssertEqual(history.sessions.count, 3)
+        history.update(name: nil, titleID: nil, romPath: nil, now: t0 + 606)
+        history.update(name: "Zelda", titleID: nil, romPath: "/g/Zelda.nsp", now: t0 + 609)
+        XCTAssertEqual(history.sessions.count, 4, "idle or stop closes the session")
+    }
+
+    func testTotalsAndPersistence() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let history = PlayHistory(file: file)
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        history.update(name: "Mario", titleID: "0100A", romPath: "/g/Mario.xci", now: t0)
+        history.update(name: "Mario", titleID: "0100A", romPath: "/g/Mario.xci", now: t0 + 50)
+        history.update(name: "Zelda", titleID: nil, romPath: "/g/Zelda.nsp", now: t0 + 100)
+        history.update(name: "Zelda", titleID: nil, romPath: "/g/Zelda.nsp", now: t0 + 130)
+        history.save()
+
+        let reloaded = PlayHistory(file: file)
+        XCTAssertEqual(reloaded.sessions.count, 2)
+        XCTAssertEqual(reloaded.total(since: .distantPast), 80)
+        XCTAssertEqual(reloaded.total(since: t0 + 25), 55, "sessions are cut at the date")
+        let rows = reloaded.totals(recentSince: t0 + 110)
+        XCTAssertEqual(rows.map(\.name), ["Mario", "Zelda"])
+        XCTAssertEqual(rows.map(\.recent), [0, 20])
+    }
+
+    func testFormat() {
+        XCTAssertEqual(PlayHistory.format(30), "0 min")
+        XCTAssertEqual(PlayHistory.format(45 * 60), "45 min")
+        XCTAssertEqual(PlayHistory.format(3 * 3600 + 5 * 60), "3 h 05")
+    }
+}
+
+final class VersionTests: XCTestCase {
+    func testVersionInFileName() {
+        L10n.isFrench = false
+        XCTAssertEqual(GameDetector.version(in: "Zelda [0100F2C0115B6000][v1.2.0]"), "1.2.0")
+        XCTAssertEqual(GameDetector.version(in: "Zelda v1.0.1 (EU)"), "1.0.1")
+        XCTAssertEqual(GameDetector.version(in: "Zelda [0100F2C0115B6800][v196608]"), "update 3")
+        XCTAssertNil(GameDetector.version(in: "Zelda [0100F2C0115B6000][v0]"))
+        XCTAssertNil(GameDetector.version(in: "Zelda Remastered"))
+        XCTAssertNil(GameDetector.version(in: "Mariov2"))
+    }
+
+    func testTitleKinds() {
+        XCTAssertEqual(GameDetector.kind(of: "0100F2C0115B6000"), .base)
+        XCTAssertEqual(GameDetector.kind(of: "0100F2C0115B6800"), .update)
+        XCTAssertEqual(GameDetector.kind(of: "0100F2C0115B7001"), .dlc)
+        XCTAssertNil(GameDetector.kind(of: "nope"))
+        XCTAssertEqual(GameDetector.baseTitleID(of: "0100F2C0115B6800"), "0100F2C0115B6000")
+        XCTAssertEqual(GameDetector.baseTitleID(of: "0100F2C0115B7001"), "0100F2C0115B6000")
+        XCTAssertEqual(GameDetector.baseTitleID(of: "0100F2C0115B6000"), "0100F2C0115B6000")
+    }
+
+    func testSmallImageNeedsWebURL() {
+        var p = Presence(details: "Zelda", image: "https://x/c.png", smallImage: "https://x/l.png", smallText: "Astris · v1.2.0")
+        var assets = p.activity["assets"] as? [String: Any]
+        XCTAssertEqual(assets?["small_text"] as? String, "Astris · v1.2.0")
+        p.smallImage = nil
+        assets = p.activity["assets"] as? [String: Any]
+        XCTAssertNil(assets?["small_text"])
+    }
+}
+
+final class CustomCoverTests: XCTestCase {
+    func testOldPrefsStillDecode() throws {
+        let old = Data(#"{"Mario.xcz": {"hidden": true}}"#.utf8)
+        let prefs = try JSONDecoder().decode([String: GameSettings.GamePrefs].self, from: old)
+        XCTAssertEqual(prefs["Mario.xcz"]?.hidden, true)
+        XCTAssertNil(prefs["Mario.xcz"]?.customCover)
+    }
+
+    func testOnlyWebCoversGoToDiscord() throws {
+        let settings = GameSettings(defaults: try XCTUnwrap(UserDefaults(suiteName: "AstrisRPCTests-\(UUID().uuidString)")))
+        settings.setCustomCover("https://x/cover.png", for: "/g/Homebrew.nro")
+        XCTAssertEqual(settings.discordCover(for: "/moved/Homebrew.nro"), "https://x/cover.png")
+        settings.setCustomCover("file:///tmp/cover.png", for: "/g/Homebrew.nro")
+        XCTAssertNil(settings.discordCover(for: "/g/Homebrew.nro"))
+        XCTAssertEqual(settings.prefs(for: "/g/Homebrew.nro").customCover, "file:///tmp/cover.png")
+        settings.setCustomCover("  ", for: "/g/Homebrew.nro")
+        XCTAssertTrue(settings.prefs.isEmpty)
+    }
+}
+
+final class FavoritesTests: XCTestCase {
+    func testFavoritesPersistInOrder() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "AstrisRPCTests-\(UUID().uuidString)"))
+        let settings = GameSettings(defaults: defaults)
+        settings.setFavorite(true, for: "/g/Zelda.nsp")
+        settings.setFavorite(true, for: "/g/Mario.xci")
+        settings.setFavorite(true, for: "/g/Zelda.nsp")
+        XCTAssertEqual(settings.favorites, ["/g/Mario.xci", "/g/Zelda.nsp"])
+        settings.setFavorite(false, for: "/g/Mario.xci")
+        XCTAssertEqual(GameSettings(defaults: defaults).favorites, ["/g/Zelda.nsp"])
+        XCTAssertTrue(settings.isFavorite("/g/Zelda.nsp"))
+    }
+}
+
+final class HotKeysTests: XCTestCase {
+    func testDefaultsAndKeys() throws {
+        let settings = GameSettings(defaults: try XCTUnwrap(UserDefaults(suiteName: "AstrisRPCTests-\(UUID().uuidString)")))
+        XCTAssertTrue(settings.hotKeysEnabled)
+        XCTAssertEqual(HotKeys.keyEquivalent(.toggleDiscord), "d")
+        XCTAssertEqual(HotKeys.keyEquivalent(.toggleHideGame), "h")
+        XCTAssertNotEqual(HotKeys.Action.toggleDiscord.keyCode, HotKeys.Action.toggleHideGame.keyCode)
+    }
+}

@@ -10,4 +10,7 @@ cp -R build/AstrisRPC.app "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
 hdiutil create -volname "Astris RPC" -srcfolder "$STAGE" -ov -format UDZO build/AstrisRPC.dmg
 rm -rf "$STAGE"
+if [[ "${SIGN_IDENTITY:--}" != "-" ]]; then
+    codesign --force --timestamp --sign "$SIGN_IDENTITY" build/AstrisRPC.dmg
+fi
 echo "OK: build/AstrisRPC.dmg"

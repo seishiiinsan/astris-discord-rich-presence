@@ -1,36 +1,6 @@
 import AppKit
 import Combine
 
-struct Presence: Equatable {
-    var details: String
-    var state: String?
-    var start: Date?
-    var image: String?
-    var imageText: String?
-    var buttons: [(label: String, url: String)] = []
-
-    static func == (a: Presence, b: Presence) -> Bool {
-        a.details == b.details && a.state == b.state && a.start == b.start
-            && a.image == b.image && a.imageText == b.imageText
-            && a.buttons.map { $0.label } == b.buttons.map { $0.label } && a.buttons.map { $0.url } == b.buttons.map { $0.url }
-    }
-
-    var activity: [String: Any] {
-        var a: [String: Any] = ["type": 0, "details": details]
-        if let state { a["state"] = state }
-        if let start { a["timestamps"] = ["start": Int(start.timeIntervalSince1970)] }
-        if let image {
-            var assets: [String: Any] = ["large_image": image]
-            if let imageText { assets["large_text"] = imageText }
-            a["assets"] = assets
-        }
-        if !buttons.isEmpty {
-            a["buttons"] = buttons.prefix(2).map { ["label": $0.label, "url": $0.url] }
-        }
-        return a
-    }
-}
-
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     static let clientID = "1564590186887774209"
     private static let astrisLogo =
@@ -42,6 +12,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let covers = CoverResolver()
     private let eShop = EShopResolver()
     private let recents = RecentGames()
+    private let idle = IdleMonitor()
+    private let history = PlayHistory()
+    private var isIdle = false
     private var thumbnails: [String: NSImage] = [:]
     private var loadingThumbnails: Set<String> = []
     private let updater = Updater()
@@ -62,11 +35,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let gameItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let discordItem = NSMenuItem(title: "", action: #selector(openDiscord), keyEquivalent: "")
     private let enabledItem = NSMenuItem(title: L10n.tr("Afficher sur Discord", "Show on Discord"), action: #selector(toggleEnabled), keyEquivalent: "")
+    private let hideGameItem = NSMenuItem(title: L10n.tr("Masquer ce jeu sur Discord", "Hide This Game on Discord"), action: #selector(toggleHideGame), keyEquivalent: "")
+    private let hotKeys = HotKeys()
     private let settingsItem = NSMenuItem(title: L10n.tr("Réglages…", "Settings…"), action: #selector(openSettings), keyEquivalent: ",")
     private let updateItem = NSMenuItem(title: "", action: #selector(confirmUpdate), keyEquivalent: "")
     private let recentsItem = NSMenuItem(title: L10n.tr("Jeux récents", "Recent Games"), action: nil, keyEquivalent: "")
+    private let favoritesItem = NSMenuItem(title: L10n.tr("Favoris", "Favorites"), action: nil, keyEquivalent: "")
     private let checkItem = NSMenuItem(title: L10n.tr("Rechercher les mises à jour…", "Check for Updates…"), action: #selector(checkForUpdates), keyEquivalent: "")
+    private let diagnosticItem = NSMenuItem(title: L10n.tr("Copier le diagnostic", "Copy Diagnostics"), action: #selector(copyDiagnostic), keyEquivalent: "")
+    /// Last presence built by `tick`, for the diagnostic.
+    private var lastPresence: Presence?
+    private var loggedGame: String?
     private var discordConnected = false
+    /// Last refusal from Discord for the current presence, shown in the menu.
+    private var discordError: String?
     private var timer: Timer?
     private var updateTimer: Timer?
 
@@ -81,11 +63,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         signal(SIGPIPE, SIG_IGN)
+        Log.shared.toFile = settings.writeLog
+        Log.shared.add("Astris RPC \(Updater.currentVersion) started, macOS \(ProcessInfo.processInfo.operatingSystemVersionString)")
         setUpMenu()
         // Settings window edits apply right away.
         settingsObserver = settings.objectWillChange.sink { [weak self] _ in
-            DispatchQueue.main.async { self?.tick() }
+            DispatchQueue.main.async {
+                self?.syncHotKeys()
+                self?.tick()
+            }
         }
+        hotKeys.onAction = { [weak self] action in
+            switch action {
+            case .toggleDiscord: self?.toggleEnabled()
+            case .toggleHideGame: self?.toggleHideGame()
+            }
+        }
+        syncHotKeys()
         let center = NSWorkspace.shared.notificationCenter
         center.addObserver(self, selector: #selector(appLaunched(_:)),
                            name: NSWorkspace.didLaunchApplicationNotification, object: nil)
@@ -100,6 +94,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        history.save()
         discordQueue.sync {
             if discord.isConnected { _ = discord.setActivity(nil) }
             discord.disconnect()
@@ -110,6 +105,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Polls only while Astris runs; otherwise waits for launch notifications.
     private func astrisChanged() {
+        Log.shared.add(astris.map { "Astris running (pid \($0.processIdentifier), \($0.bundleIdentifier ?? "no bundle id"))" } ?? "Astris not running")
         timer?.invalidate()
         timer = nil
         if astris != nil {
@@ -145,6 +141,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let titleID = detector.game?.titleID, let rom = detector.romPath {
             settings.rememberTitleID(titleID, for: rom)
         }
+        let gameKey = detector.romPath
+        if gameKey != loggedGame {
+            loggedGame = gameKey
+            if let game = detector.game, let rom = gameKey {
+                Log.shared.add("Game: \(game.name) [\(game.titleID ?? "no TitleID")] \((rom as NSString).lastPathComponent)")
+            } else if astris != nil {
+                Log.shared.add("No game running")
+            }
+        }
         if let game = detector.game, let rom = detector.romPath, recents.entries.first?.romPath != rom {
             recents.record(name: game.name, titleID: game.titleID, romPath: rom)
         }
@@ -159,17 +164,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     buttons: [("Astris", Self.astrisURL)])
             } else if let game = detector.game {
                 let name = detector.romPath.map { settings.displayName(for: $0, detected: game.name) } ?? game.name
-                let played = game.playedTime.flatMap(Self.formatPlayed)
+                // "1.2.0" -> "v1.2.0"; "update 3" stays as is.
+                let version = game.version.map { $0.first?.isNumber == true ? "v\($0)" : $0 }
+                let values: [String: String?] = [
+                    "game": name,
+                    "played": game.playedTime.flatMap(Self.formatPlayed),
+                    "version": version,
+                ]
+                var buttons: [(label: String, url: String)] = []
+                if settings.showEShopButton {
+                    buttons.append((L10n.tr("Voir sur l'eShop", "View on eShop"), eShop.url(titleID: game.titleID, name: game.name)))
+                }
+                buttons.append(settings.customButton ?? ("Astris", Self.astrisURL))
+                let cover = detector.romPath.flatMap(settings.discordCover(for:)) ?? game.titleID.flatMap(covers.cover(for:))
                 presence = Presence(
-                    details: name,
-                    state: played.map { L10n.tr("Sur Astris · \($0) jouées", "On Astris · \($0) played") } ?? L10n.tr("Sur Astris", "On Astris"),
+                    details: PresenceTemplate.render(Self.template(settings.detailsTemplate, PresenceTemplate.defaultDetails), values: values) ?? name,
+                    state: PresenceTemplate.render(Self.template(settings.stateTemplate, PresenceTemplate.defaultState), values: values),
                     start: game.start,
-                    image: game.titleID.flatMap(covers.cover(for:)) ?? Self.astrisLogo,
+                    image: cover ?? Self.astrisLogo,
                     imageText: name,
-                    buttons: [
-                        (L10n.tr("Voir sur l'eShop", "View on eShop"), eShop.url(titleID: game.titleID, name: game.name)),
-                        ("Astris", Self.astrisURL),
-                    ])
+                    // Astris badge on the cover, with the game version when known.
+                    smallImage: cover == nil ? nil : Self.astrisLogo,
+                    smallText: version.map { "Astris · \($0)" } ?? "Astris",
+                    buttons: buttons)
             } else {
                 presence = Presence(
                     details: L10n.tr("Dans le menu", "In the menu"), state: L10n.tr("Sur Astris", "On Astris"), start: astris.launchDate,
@@ -178,8 +195,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
 
+        let wasIdle = isIdle
+        isIdle = detector.game != nil && IdleMonitor.isIdle(idleTime: idle.idleTime, afterMinutes: settings.idleMinutes)
+        if isIdle != wasIdle { Log.shared.add(isIdle ? "Idle" : "Back from idle") }
+        let played = isIdle ? nil : detector.game
+        history.update(name: played?.name, titleID: played?.titleID, romPath: played == nil ? nil : detector.romPath)
+        if isIdle, presence != nil {
+            // Paused: no running clock.
+            presence?.state = L10n.tr("En pause · Sur Astris", "Idle · On Astris")
+            presence?.start = nil
+        }
+
+        lastPresence = presence
         push(presence)
         refreshMenu(astrisRunning: astris != nil)
+    }
+
+    private static func template(_ custom: String?, _ fallback: String) -> String {
+        guard let custom, !custom.trimmingCharacters(in: .whitespaces).isEmpty else { return fallback }
+        return custom
     }
 
     /// "45 min", "12 h"
@@ -204,17 +238,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if !discord.isConnected {
                 guard Date() >= nextConnectAttempt else { return }
                 guard discord.connect() else {
+                    if connectBackoff == 3 { Log.shared.add("Discord unreachable, retrying") }
                     // Discord closed: back off 3 s → 6 → 12 … up to 60 s.
                     nextConnectAttempt = Date().addingTimeInterval(connectBackoff)
                     connectBackoff = min(connectBackoff * 2, 60)
                     return
                 }
                 connectBackoff = 3
+                Log.shared.add("Connected to Discord")
+                DispatchQueue.main.async { self.discordError = nil }
             }
-            if discord.setActivity(presence?.activity) {
+            switch discord.setActivity(presence?.activity) {
+            case .ok:
                 sentPresence = presence
                 hasSent = true
-            } else {
+                DispatchQueue.main.async { self.discordError = nil }
+            case .rejected(let message):
+                Log.shared.add("Discord rejected the presence: \(message)")
+                // Don't resend the same refused presence every 3 s.
+                sentPresence = presence
+                hasSent = true
+                DispatchQueue.main.async { self.discordError = message }
+            case .failed:
+                Log.shared.add("Discord connection lost")
                 hasSent = false
             }
         }
@@ -247,12 +293,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         recentsItem.image = Self.symbol("clock.arrow.circlepath")
         recentsItem.submenu = NSMenu()
         menu.addItem(recentsItem)
+        favoritesItem.image = Self.symbol("star")
+        favoritesItem.submenu = NSMenu()
+        favoritesItem.isHidden = settings.favorites.isEmpty
+        menu.addItem(favoritesItem)
         menu.addItem(.separator())
 
         // Settings.
         enabledItem.image = Self.symbol("eye")
+        hideGameItem.image = Self.symbol("eye.slash")
         settingsItem.image = Self.symbol("gearshape")
-        for item in [enabledItem, settingsItem] {
+        for item in [enabledItem, hideGameItem, settingsItem] {
             item.target = self
             menu.addItem(item)
         }
@@ -269,6 +320,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let versionItem = NSMenuItem(title: "Astris RPC \(Updater.currentVersion)", action: nil, keyEquivalent: "")
         versionItem.isEnabled = false
         menu.addItem(versionItem)
+        diagnosticItem.target = self
+        diagnosticItem.image = Self.symbol("stethoscope")
+        menu.addItem(diagnosticItem)
         menu.addItem(.separator())
 
         menu.addItem(NSMenuItem(title: L10n.tr("Quitter Astris RPC", "Quit Astris RPC"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
@@ -285,18 +339,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: - Recent games
 
     private func refreshRecents() {
-        let submenu = recentsItem.submenu ?? NSMenu()
+        fill(recentsItem, with: recents.entries.map { (path: $0.romPath, name: $0.name, titleID: $0.titleID) })
+        fill(favoritesItem, with: settings.favorites.map { path -> (path: String, name: String, titleID: String?) in
+            let file = ((path as NSString).lastPathComponent as NSString).deletingPathExtension
+            let titleID = GameDetector.titleID(in: file)?.uppercased() ?? settings.knownTitleIDs[GameSettings.key(for: path)]
+            return (path: path, name: GameDetector.cleanName(file), titleID: titleID)
+        })
+        favoritesItem.isHidden = settings.favorites.isEmpty
+    }
+
+    /// One item per game, with its cover; a click opens it in Astris.
+    private func fill(_ parent: NSMenuItem, with games: [(path: String, name: String, titleID: String?)]) {
+        let submenu = parent.submenu ?? NSMenu()
         submenu.removeAllItems()
-        recentsItem.isEnabled = !recents.entries.isEmpty
-        for entry in recents.entries {
-            let item = NSMenuItem(title: settings.displayName(for: entry.romPath, detected: entry.name), action: #selector(openRecent(_:)), keyEquivalent: "")
+        parent.isEnabled = !games.isEmpty
+        for game in games {
+            let item = NSMenuItem(title: settings.displayName(for: game.path, detected: game.name), action: #selector(openRecent(_:)), keyEquivalent: "")
             item.target = self
-            item.representedObject = entry.romPath
-            item.toolTip = entry.romPath
-            item.isEnabled = FileManager.default.fileExists(atPath: entry.romPath)
-            if let id = entry.titleID {
+            item.representedObject = game.path
+            item.toolTip = game.path
+            item.isEnabled = FileManager.default.fileExists(atPath: game.path)
+            if let custom = settings.prefs(for: game.path).customCover {
+                item.image = thumbnails[custom] ?? Self.symbol("gamecontroller")
+                loadThumbnail(key: custom, link: custom)
+            } else if let id = game.titleID {
                 item.image = thumbnails[id] ?? Self.symbol("gamecontroller")
-                loadThumbnail(id)
+                if let link = covers.cover(for: id) { loadThumbnail(key: id, link: link) }
             } else {
                 item.image = Self.symbol("gamecontroller")
             }
@@ -304,34 +372,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    /// Downloads the cover once and keeps a menu-sized copy for next time the menu opens.
-    private func loadThumbnail(_ titleID: String) {
-        guard thumbnails[titleID] == nil, !loadingThumbnails.contains(titleID),
-              let link = covers.cover(for: titleID), let url = URL(string: link) else { return }
-        loadingThumbnails.insert(titleID)
-        URLSession.shared.dataTask(with: url) { data, _, _ in
-            let image = data.flatMap(NSImage.init(data:))
-            DispatchQueue.main.async { [weak self] in
-                guard let self else { return }
-                loadingThumbnails.remove(titleID)
-                guard let image else { return }
-                image.size = NSSize(width: 20, height: 20)
-                thumbnails[titleID] = image
-            }
-        }.resume()
+    /// Loads the cover (from the disk cache when possible) and keeps a menu-sized copy.
+    private func loadThumbnail(key: String, link: String) {
+        guard thumbnails[key] == nil, !loadingThumbnails.contains(key) else { return }
+        loadingThumbnails.insert(key)
+        ImageCache.shared.image(for: link) { [weak self] image in
+            guard let self else { return }
+            loadingThumbnails.remove(key)
+            guard let thumb = image?.copy() as? NSImage else { return }
+            thumb.size = NSSize(width: 20, height: 20)
+            thumbnails[key] = thumb
+        }
     }
 
     @objc private func openRecent(_ sender: NSMenuItem) {
         guard let path = sender.representedObject as? String else { return }
-        let astrisApp = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "V380-Ori.Astris")
-            ?? URL(fileURLWithPath: "/Applications/Astris.app")
-        NSWorkspace.shared.open([URL(fileURLWithPath: path)], withApplicationAt: astrisApp, configuration: .init()) { _, error in
-            guard let error else { return }
-            DispatchQueue.main.async {
-                NSApp.activate(ignoringOtherApps: true)
-                NSAlert(error: error).runModal()
-            }
-        }
+        AstrisLauncher.open(path)
     }
 
     private func refreshMenu(astrisRunning: Bool) {
@@ -346,12 +402,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             gameItem.image = Self.symbol("gamecontroller")
         }
         if #available(macOS 14.4, *) {
-            gameItem.subtitle = detector.game?.playedTime.flatMap(Self.formatPlayed).map { L10n.tr("\($0) jouées avant cette session", "\($0) played before this session") }
+            gameItem.subtitle = isIdle
+                ? L10n.tr("En pause sur Discord", "Idle on Discord")
+                : detector.game?.playedTime.flatMap(Self.formatPlayed).map { L10n.tr("\($0) jouées avant cette session", "\($0) played before this session") }
         }
 
         // Discord row doubles as the fix: click to open Discord when it isn't running.
         // Without Astris there's nothing to show, so no IPC connection: judge by the running app.
-        if discordConnected {
+        discordItem.toolTip = nil
+        if #available(macOS 14.4, *) { discordItem.subtitle = nil }
+        if discordConnected, let discordError {
+            discordItem.title = L10n.tr("Discord a refusé l'affichage", "Discord rejected the presence")
+            discordItem.image = Self.symbol("exclamationmark.circle.fill", color: .systemOrange)
+            discordItem.toolTip = discordError
+            if #available(macOS 14.4, *) { discordItem.subtitle = discordError }
+            discordItem.isEnabled = false
+        } else if discordConnected {
             discordItem.title = L10n.tr("Connecté à Discord", "Connected to Discord")
             discordItem.image = Self.symbol("checkmark.circle.fill", color: .systemGreen)
             discordItem.isEnabled = false
@@ -368,6 +434,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         enabledItem.state = enabled ? .on : .off
+        hideGameItem.isHidden = detector.game == nil
+        hideGameItem.state = detector.romPath.map(settings.isHidden) == true ? .on : .off
+        let shortcutMask: NSEvent.ModifierFlags = [.control, .option, .command]
+        for (item, action) in [(enabledItem, HotKeys.Action.toggleDiscord), (hideGameItem, .toggleHideGame)] {
+            // Shown as a hint; the global hot key does the work.
+            item.keyEquivalent = hotKeys.isRegistered ? HotKeys.keyEquivalent(action) : ""
+            item.keyEquivalentModifierMask = shortcutMask
+        }
         refreshIcon(astrisRunning: astrisRunning)
     }
 
@@ -409,14 +483,78 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func toggleEnabled() {
         enabled.toggle()
+        Log.shared.add(enabled ? "Presence on" : "Presence off")
         tick()
+    }
+
+    /// Blacklists (or not) the game being played, without opening Settings.
+    @objc private func toggleHideGame() {
+        guard let rom = detector.romPath else { NSSound.beep(); return }
+        settings.setHidden(!settings.isHidden(rom), for: rom)
+        Log.shared.add(settings.isHidden(rom) ? "Current game hidden" : "Current game shown")
+        tick()
+    }
+
+    private func syncHotKeys() {
+        if settings.hotKeysEnabled && !hotKeys.isRegistered {
+            hotKeys.register()
+        } else if !settings.hotKeysEnabled && hotKeys.isRegistered {
+            hotKeys.unregister()
+        }
     }
 
     @objc private func openSettings() {
         if settingsWindow == nil {
-            settingsWindow = SettingsWindowController(settings: settings, covers: covers, recents: recents)
+            settingsWindow = SettingsWindowController(settings: settings, covers: covers, recents: recents, history: history)
         }
         settingsWindow?.show()
+    }
+
+    // MARK: - Diagnostic
+
+    @objc private func copyDiagnostic() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(diagnostic(), forType: .string)
+        Log.shared.add("Diagnostic copied")
+    }
+
+    /// Plain-text report to paste in a GitHub issue. File names only, never full paths.
+    func diagnostic() -> String {
+        var lines = [
+            "Astris RPC \(Updater.currentVersion)",
+            "macOS \(ProcessInfo.processInfo.operatingSystemVersionString), \(Locale.preferredLanguages.first ?? "?")",
+            "",
+            "Show on Discord: \(enabled)",
+            "Astris: " + (astris.map { "running, pid \($0.processIdentifier), \($0.bundleIdentifier ?? "no bundle id")" } ?? "not running"),
+            "Discord: " + (discordConnected ? "connected" : Self.isDiscordRunning() ? "open, not connected" : "closed"),
+        ]
+        if let discordError { lines.append("Discord error: \(discordError)") }
+        if let game = detector.game {
+            lines.append("Game: \(game.name)")
+            lines.append("TitleID: \(game.titleID ?? "none")")
+            lines.append("Version: \(game.version ?? "unknown")")
+            lines.append("ROM: \(detector.romPath.map { ($0 as NSString).lastPathComponent } ?? "?")")
+            lines.append("Played before: \(game.playedTime.flatMap(Self.formatPlayed) ?? "unknown")")
+            lines.append("Idle: \(isIdle) (\(Int(idle.idleTime)) s without input, threshold \(settings.idleMinutes) min)")
+            if let id = game.titleID {
+                lines.append("Cover: \(covers.cover(for: id) ?? "none yet")")
+                lines.append("Cover sources: " + CoverResolver.candidates(for: id).joined(separator: ", "))
+            }
+            if let rom = detector.romPath { lines.append("Hidden: \(settings.isHidden(rom))") }
+        } else {
+            lines.append("Game: none")
+        }
+        if let p = lastPresence {
+            lines.append("Presence: \(p.details) | \(p.state ?? "-") | image: \(p.image ?? "-")")
+        }
+        lines.append("Astris folders: " + GameDetector.astrisGamesDirectories
+            .map { "\($0.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")) (\(FileManager.default.fileExists(atPath: $0.path) ? "found" : "missing"))" }
+            .joined(separator: ", "))
+        lines.append("Image cache: \(ImageCache.shared.diskSize / 1024) KB")
+        lines.append("")
+        lines.append("Log:")
+        lines.append(contentsOf: Log.shared.recent.suffix(60))
+        return lines.joined(separator: "\n")
     }
 
     // MARK: - Updates
@@ -425,6 +563,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updater.check { [weak self] result in
             guard let self else { return }
             if case .failure(let error) = result {
+                Log.shared.add("Update check failed: \(error.localizedDescription)")
                 if manual {
                     NSApp.activate(ignoringOtherApps: true)
                     let alert = NSAlert()

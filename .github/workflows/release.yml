@@ -17,6 +17,9 @@ permissions:
 jobs:
   build:
     runs-on: macos-15
+    env:
+      # Signing + notarization only when all the secrets are set; otherwise an ad hoc signed build, as before.
+      CAN_NOTARIZE: ${{ secrets.MACOS_CERTIFICATE != '' && secrets.MACOS_CERTIFICATE_PASSWORD != '' && secrets.APPLE_ID != '' && secrets.APPLE_TEAM_ID != '' && secrets.APPLE_APP_PASSWORD != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -28,11 +31,55 @@ jobs:
           else V="$(tr -d '[:space:]' < VERSION)"; fi
           echo "version=${V#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Build app
+      - name: Import Developer ID certificate
+        if: env.CAN_NOTARIZE == 'true'
+        env:
+          CERT_P12: ${{ secrets.MACOS_CERTIFICATE }}
+          CERT_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
         run: |
-          VERSION="${{ steps.v.outputs.version }}" ./build.sh
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          echo "$CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -P "$CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm "$RUNNER_TEMP/cert.p12"
+          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN" | grep -o '"Developer ID Application: [^"]*"' | head -1 | tr -d '"')"
+          [[ -n "$IDENTITY" ]] || { echo "No Developer ID Application identity in the certificate"; exit 1; }
+          echo "SIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+
+      - name: Build app
+        run: VERSION="${{ steps.v.outputs.version }}" ./build.sh
+
+      - name: Notarize app
+        if: env.CAN_NOTARIZE == 'true'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          ditto -c -k --keepParent build/AstrisRPC.app build/notarize.zip
+          xcrun notarytool submit build/notarize.zip --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+          xcrun stapler staple build/AstrisRPC.app
+          rm build/notarize.zip
+
+      - name: Package
+        run: |
           ditto -c -k --keepParent build/AstrisRPC.app build/AstrisRPC.zip
           ./dmg.sh
+
+      - name: Notarize disk image
+        if: env.CAN_NOTARIZE == 'true'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          xcrun notarytool submit build/AstrisRPC.dmg --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+          xcrun stapler staple build/AstrisRPC.dmg
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
