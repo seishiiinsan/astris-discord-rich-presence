@@ -130,7 +130,8 @@ struct GeneralSettingsView: View {
                 Toggle(L10n.tr("Chrono de session dans la barre des menus", "Session timer in the menu bar"), isOn: $settings.menuBarTimer)
                 Toggle(isOn: $settings.hotKeysEnabled) {
                     Text(L10n.tr("Raccourcis clavier globaux", "Global keyboard shortcuts"))
-                    Text(L10n.tr("⌃⌥⌘D afficher sur Discord · ⌃⌥⌘H masquer le jeu en cours", "⌃⌥⌘D show on Discord · ⌃⌥⌘H hide the current game"))
+                    Text(L10n.tr("⌃⌥⌘D afficher sur Discord · ⌃⌥⌘H masquer le jeu en cours · ⌃⌥⌘G lancer un jeu",
+                                 "⌃⌥⌘D show on Discord · ⌃⌥⌘H hide the current game · ⌃⌥⌘G open a game"))
                 }
                 Picker(L10n.tr("Afficher « En pause » après", "Show “Idle” after"), selection: $settings.idleMinutes) {
                     ForEach(GameSettings.idleChoices, id: \.self) { minutes in

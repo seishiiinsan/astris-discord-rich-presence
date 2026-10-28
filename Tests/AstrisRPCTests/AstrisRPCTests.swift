@@ -409,6 +409,7 @@ final class HotKeysTests: XCTestCase {
         XCTAssertTrue(settings.hotKeysEnabled)
         XCTAssertEqual(HotKeys.keyEquivalent(.toggleDiscord), "d")
         XCTAssertEqual(HotKeys.keyEquivalent(.toggleHideGame), "h")
+        XCTAssertEqual(HotKeys.keyEquivalent(.quickLaunch), "g")
         XCTAssertNotEqual(HotKeys.Action.toggleDiscord.keyCode, HotKeys.Action.toggleHideGame.keyCode)
     }
 }
@@ -791,5 +792,33 @@ final class LibrarySizeTests: XCTestCase {
         let dupes = GameLibrary.duplicates(games)
         XCTAssertEqual(dupes.count, 2, "the update is not a duplicate")
         XCTAssertFalse(dupes.contains { $0.hasSuffix("Mario.xci") })
+    }
+}
+
+final class QuickLauncherTests: XCTestCase {
+    private func e(_ path: String, _ name: String) -> LauncherModel.Entry { .init(path: path, name: name, titleID: nil) }
+
+    func testSearchOrderAndMerge() {
+        let entries = LauncherModel.merge([
+            [e("/r/mk.xci", "Mario Kart 8 Deluxe")],
+            [e("/f/zelda.nsp", "The Legend of Zelda"), e("/r/mk.xci", "Mario Kart 8 Deluxe")],
+            [e("/l/smo.xci", "Super Mario Odyssey"), e("/l/z2.nsp", "Zelda Echoes")],
+        ])
+        XCTAssertEqual(entries.map(\.path), ["/r/mk.xci", "/f/zelda.nsp", "/l/smo.xci", "/l/z2.nsp"], "deduped, order kept")
+        XCTAssertEqual(LauncherModel.search("mario", in: entries).map(\.path), ["/r/mk.xci", "/l/smo.xci"])
+        XCTAssertEqual(LauncherModel.search("zelda", in: entries).map(\.path), ["/l/z2.nsp", "/f/zelda.nsp"], "prefix first")
+        XCTAssertEqual(LauncherModel.search("", in: entries).count, 4)
+        XCTAssertTrue(LauncherModel.search("kirby", in: entries).isEmpty)
+    }
+
+    func testSelectionWraps() {
+        let model = LauncherModel()
+        model.entries = [e("/a", "A"), e("/b", "B")]
+        model.move(-1)
+        XCTAssertEqual(model.selected, 1)
+        model.move(1)
+        XCTAssertEqual(model.selected, 0)
+        model.query = "b"
+        XCTAssertEqual(model.selected, 0, "typing resets the selection")
     }
 }

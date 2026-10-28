@@ -7,11 +7,15 @@ final class HotKeys {
     enum Action: UInt32 {
         case toggleDiscord = 1
         case toggleHideGame = 2
+        case quickLaunch = 3
+
+        static let all: [Action] = [.toggleDiscord, .toggleHideGame, .quickLaunch]
 
         var keyCode: Int {
             switch self {
             case .toggleDiscord: return kVK_ANSI_D
             case .toggleHideGame: return kVK_ANSI_H
+            case .quickLaunch: return kVK_ANSI_G
             }
         }
     }
@@ -19,7 +23,11 @@ final class HotKeys {
     static let modifiers = UInt32(controlKey | optionKey | cmdKey)
     /// For menus: same keys, same modifiers.
     static func keyEquivalent(_ action: Action) -> String {
-        action == .toggleDiscord ? "d" : "h"
+        switch action {
+        case .toggleDiscord: return "d"
+        case .toggleHideGame: return "h"
+        case .quickLaunch: return "g"
+        }
     }
 
     var onAction: ((Action) -> Void)?
@@ -45,7 +53,7 @@ final class HotKeys {
             Log.shared.add("Hot keys: handler failed (\(status))")
             return
         }
-        for action in [Action.toggleDiscord, .toggleHideGame] {
+        for action in Action.all {
             var ref: EventHotKeyRef?
             let id = EventHotKeyID(signature: OSType(0x4152_5043), id: action.rawValue) // 'ARPC'
             let result = RegisterEventHotKey(UInt32(action.keyCode), Self.modifiers, id, GetApplicationEventTarget(), 0, &ref)

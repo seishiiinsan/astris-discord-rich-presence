@@ -45,6 +45,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let streamerItem = NSMenuItem(title: L10n.tr("Mode streamer", "Streamer Mode"), action: #selector(toggleStreamer), keyEquivalent: "")
     private let hideGameItem = NSMenuItem(title: L10n.tr("Masquer ce jeu sur Discord", "Hide This Game on Discord"), action: #selector(toggleHideGame), keyEquivalent: "")
     private let hotKeys = HotKeys()
+    private let launcher = QuickLauncher()
+    private let launcherItem = NSMenuItem(title: L10n.tr("Lancer un jeu…", "Open a Game…"), action: #selector(openQuickLauncher), keyEquivalent: "")
     private let settingsItem = NSMenuItem(title: L10n.tr("Réglages…", "Settings…"), action: #selector(openSettings), keyEquivalent: ",")
     private let updateItem = NSMenuItem(title: "", action: #selector(confirmUpdate), keyEquivalent: "")
     private let recentsItem = NSMenuItem(title: L10n.tr("Jeux récents", "Recent Games"), action: nil, keyEquivalent: "")
@@ -93,6 +95,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             switch action {
             case .toggleDiscord: self?.toggleEnabled()
             case .toggleHideGame: self?.toggleHideGame()
+            case .quickLaunch: self?.openQuickLauncher()
             }
         }
         syncHotKeys()
@@ -140,6 +143,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             tick()
         case .settings: openSettings()
         case .launch(let name): launch(named: name)
+        }
+    }
+
+    /// Floating search; the library is (re)scanned in the background each time it opens.
+    @objc private func openQuickLauncher() {
+        launcher.onLaunch = { AstrisLauncher.open($0) }
+        let recent = recents.entries.map { LauncherModel.Entry(path: $0.romPath, name: $0.name, titleID: $0.titleID) }
+        let favorites = settings.favorites.map { path -> LauncherModel.Entry in
+            let file = ((path as NSString).lastPathComponent as NSString).deletingPathExtension
+            return LauncherModel.Entry(path: path, name: GameDetector.cleanName(file),
+                                       titleID: GameDetector.titleID(in: file)?.uppercased() ?? settings.knownTitleIDs[GameSettings.key(for: path)])
+        }
+        launcher.model.entries = LauncherModel.merge([recent, favorites, launcher.model.entries])
+        launcher.toggle(covers: covers, settings: settings)
+        guard let folder = settings.gamesFolder else { return }
+        let known = settings.knownTitleIDs
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let library = GameLibrary.scan(folder, known: known, titles: GameDetector.metadataTitleIndex())
+                .map { LauncherModel.Entry(path: $0.url.path, name: $0.name, titleID: $0.titleID) }
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.launcher.model.entries = LauncherModel.merge([recent, favorites, library])
+            }
         }
     }
 
@@ -444,6 +470,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         hideGameItem.image = Self.symbol("eye.slash")
         settingsItem.image = Self.symbol("gearshape")
         streamerItem.image = Self.symbol("video")
+        launcherItem.image = Self.symbol("magnifyingglass")
+        launcherItem.target = self
+        menu.insertItem(launcherItem, at: menu.index(of: recentsItem))
         for item in [enabledItem, hideGameItem, streamerItem, settingsItem] {
             item.target = self
             menu.addItem(item)
@@ -581,7 +610,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         hideGameItem.isHidden = detector.game == nil
         hideGameItem.state = detector.romPath.map(settings.isHidden) == true ? .on : .off
         let shortcutMask: NSEvent.ModifierFlags = [.control, .option, .command]
-        for (item, action) in [(enabledItem, HotKeys.Action.toggleDiscord), (hideGameItem, .toggleHideGame)] {
+        for (item, action) in [(enabledItem, HotKeys.Action.toggleDiscord), (hideGameItem, .toggleHideGame), (launcherItem, .quickLaunch)] {
             // Shown as a hint; the global hot key does the work.
             item.keyEquivalent = hotKeys.isRegistered ? HotKeys.keyEquivalent(action) : ""
             item.keyEquivalentModifierMask = shortcutMask
