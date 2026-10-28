@@ -36,6 +36,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let updateItem = NSMenuItem(title: "", action: #selector(confirmUpdate), keyEquivalent: "")
     private let recentsItem = NSMenuItem(title: L10n.tr("Jeux récents", "Recent Games"), action: nil, keyEquivalent: "")
     private let checkItem = NSMenuItem(title: L10n.tr("Rechercher les mises à jour…", "Check for Updates…"), action: #selector(checkForUpdates), keyEquivalent: "")
+    private let diagnosticItem = NSMenuItem(title: L10n.tr("Copier le diagnostic", "Copy Diagnostics"), action: #selector(copyDiagnostic), keyEquivalent: "")
+    /// Last presence built by `tick`, for the diagnostic.
+    private var lastPresence: Presence?
+    private var loggedGame: String?
     private var discordConnected = false
     /// Last refusal from Discord for the current presence, shown in the menu.
     private var discordError: String?
@@ -53,6 +57,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         signal(SIGPIPE, SIG_IGN)
+        Log.shared.toFile = settings.writeLog
+        Log.shared.add("Astris RPC \(Updater.currentVersion) started, macOS \(ProcessInfo.processInfo.operatingSystemVersionString)")
         setUpMenu()
         // Settings window edits apply right away.
         settingsObserver = settings.objectWillChange.sink { [weak self] _ in
@@ -82,6 +88,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Polls only while Astris runs; otherwise waits for launch notifications.
     private func astrisChanged() {
+        Log.shared.add(astris.map { "Astris running (pid \($0.processIdentifier), \($0.bundleIdentifier ?? "no bundle id"))" } ?? "Astris not running")
         timer?.invalidate()
         timer = nil
         if astris != nil {
@@ -117,6 +124,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let titleID = detector.game?.titleID, let rom = detector.romPath {
             settings.rememberTitleID(titleID, for: rom)
         }
+        let gameKey = detector.romPath
+        if gameKey != loggedGame {
+            loggedGame = gameKey
+            if let game = detector.game, let rom = gameKey {
+                Log.shared.add("Game: \(game.name) [\(game.titleID ?? "no TitleID")] \((rom as NSString).lastPathComponent)")
+            } else if astris != nil {
+                Log.shared.add("No game running")
+            }
+        }
         if let game = detector.game, let rom = detector.romPath, recents.entries.first?.romPath != rom {
             recents.record(name: game.name, titleID: game.titleID, romPath: rom)
         }
@@ -150,6 +166,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
 
+        lastPresence = presence
         push(presence)
         refreshMenu(astrisRunning: astris != nil)
     }
@@ -176,12 +193,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if !discord.isConnected {
                 guard Date() >= nextConnectAttempt else { return }
                 guard discord.connect() else {
+                    if connectBackoff == 3 { Log.shared.add("Discord unreachable, retrying") }
                     // Discord closed: back off 3 s → 6 → 12 … up to 60 s.
                     nextConnectAttempt = Date().addingTimeInterval(connectBackoff)
                     connectBackoff = min(connectBackoff * 2, 60)
                     return
                 }
                 connectBackoff = 3
+                Log.shared.add("Connected to Discord")
                 DispatchQueue.main.async { self.discordError = nil }
             }
             switch discord.setActivity(presence?.activity) {
@@ -190,11 +209,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 hasSent = true
                 DispatchQueue.main.async { self.discordError = nil }
             case .rejected(let message):
+                Log.shared.add("Discord rejected the presence: \(message)")
                 // Don't resend the same refused presence every 3 s.
                 sentPresence = presence
                 hasSent = true
                 DispatchQueue.main.async { self.discordError = message }
             case .failed:
+                Log.shared.add("Discord connection lost")
                 hasSent = false
             }
         }
@@ -249,6 +270,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let versionItem = NSMenuItem(title: "Astris RPC \(Updater.currentVersion)", action: nil, keyEquivalent: "")
         versionItem.isEnabled = false
         menu.addItem(versionItem)
+        diagnosticItem.target = self
+        diagnosticItem.image = Self.symbol("stethoscope")
+        menu.addItem(diagnosticItem)
         menu.addItem(.separator())
 
         menu.addItem(NSMenuItem(title: L10n.tr("Quitter Astris RPC", "Quit Astris RPC"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
@@ -404,12 +428,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settingsWindow?.show()
     }
 
+    // MARK: - Diagnostic
+
+    @objc private func copyDiagnostic() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(diagnostic(), forType: .string)
+        Log.shared.add("Diagnostic copied")
+    }
+
+    /// Plain-text report to paste in a GitHub issue. File names only, never full paths.
+    func diagnostic() -> String {
+        var lines = [
+            "Astris RPC \(Updater.currentVersion)",
+            "macOS \(ProcessInfo.processInfo.operatingSystemVersionString), \(Locale.preferredLanguages.first ?? "?")",
+            "",
+            "Show on Discord: \(enabled)",
+            "Astris: " + (astris.map { "running, pid \($0.processIdentifier), \($0.bundleIdentifier ?? "no bundle id")" } ?? "not running"),
+            "Discord: " + (discordConnected ? "connected" : Self.isDiscordRunning() ? "open, not connected" : "closed"),
+        ]
+        if let discordError { lines.append("Discord error: \(discordError)") }
+        if let game = detector.game {
+            lines.append("Game: \(game.name)")
+            lines.append("TitleID: \(game.titleID ?? "none")")
+            lines.append("ROM: \(detector.romPath.map { ($0 as NSString).lastPathComponent } ?? "?")")
+            lines.append("Played before: \(game.playedTime.flatMap(Self.formatPlayed) ?? "unknown")")
+            if let id = game.titleID {
+                lines.append("Cover: \(covers.cover(for: id) ?? "none yet")")
+                lines.append("Cover sources: " + CoverResolver.candidates(for: id).joined(separator: ", "))
+            }
+            if let rom = detector.romPath { lines.append("Hidden: \(settings.isHidden(rom))") }
+        } else {
+            lines.append("Game: none")
+        }
+        if let p = lastPresence {
+            lines.append("Presence: \(p.details) | \(p.state ?? "-") | image: \(p.image ?? "-")")
+        }
+        lines.append("Astris folders: " + GameDetector.astrisGamesDirectories
+            .map { "\($0.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")) (\(FileManager.default.fileExists(atPath: $0.path) ? "found" : "missing"))" }
+            .joined(separator: ", "))
+        lines.append("Image cache: \(ImageCache.shared.diskSize / 1024) KB")
+        lines.append("")
+        lines.append("Log:")
+        lines.append(contentsOf: Log.shared.recent.suffix(60))
+        return lines.joined(separator: "\n")
+    }
+
     // MARK: - Updates
 
     private func checkUpdates(manual: Bool) {
         updater.check { [weak self] result in
             guard let self else { return }
             if case .failure(let error) = result {
+                Log.shared.add("Update check failed: \(error.localizedDescription)")
                 if manual {
                     NSApp.activate(ignoringOtherApps: true)
                     let alert = NSAlert()

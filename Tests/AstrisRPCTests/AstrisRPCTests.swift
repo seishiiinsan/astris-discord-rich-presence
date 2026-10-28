@@ -246,3 +246,16 @@ final class DiskCacheTests: XCTestCase {
         XCTAssertEqual(ImageCache.fileName(for: "a").count, 64)
     }
 }
+
+final class LogTests: XCTestCase {
+    func testKeepsRecentLinesWithoutRepeats() {
+        let log = Log()
+        log.add("a")
+        log.add("a")
+        log.add("b")
+        XCTAssertEqual(log.recent.count, 2)
+        XCTAssertTrue(log.recent[1].hasSuffix("  b"))
+        for i in 0..<(Log.limit + 10) { log.add("line \(i)") }
+        XCTAssertEqual(log.recent.count, Log.limit)
+    }
+}

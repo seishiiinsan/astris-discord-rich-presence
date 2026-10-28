@@ -117,6 +117,27 @@ struct GeneralSettingsView: View {
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
+
+            Section {
+                Toggle(L10n.tr("Enregistrer un journal", "Keep a log file"), isOn: $settings.writeLog)
+                HStack {
+                    Button(L10n.tr("Afficher le journal", "Show Log")) {
+                        NSWorkspace.shared.activateFileViewerSelecting([Log.file])
+                    }
+                    .disabled(!FileManager.default.fileExists(atPath: Log.file.path))
+                    Button(L10n.tr("Vider le cache des jaquettes", "Clear Cover Cache")) {
+                        ImageCache.shared.clear()
+                    }
+                }
+            } header: {
+                Text(L10n.tr("Dépannage", "Troubleshooting"))
+            } footer: {
+                Text(L10n.tr(
+                    "Le journal est écrit dans ~/Library/Logs/AstrisRPC.log. Menu → Copier le diagnostic pour signaler un problème.",
+                    "The log goes to ~/Library/Logs/AstrisRPC.log. Menu → Copy Diagnostics to report a problem."))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         .formStyle(.grouped)
         .frame(width: 500)

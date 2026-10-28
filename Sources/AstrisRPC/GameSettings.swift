@@ -14,11 +14,20 @@ final class GameSettings: ObservableObject {
     private static let folderKey = "gamesFolder"
     private static let prefsKey = "gamePrefs"
     private static let titleIDsKey = "knownTitleIDs"
+    private static let logKey = "writeLog"
 
     private let defaults: UserDefaults
 
     @Published var showOnDiscord: Bool {
         didSet { defaults.set(showOnDiscord, forKey: Self.showKey) }
+    }
+
+    /// Also write the event log to ~/Library/Logs/AstrisRPC.log.
+    @Published var writeLog: Bool {
+        didSet {
+            defaults.set(writeLog, forKey: Self.logKey)
+            Log.shared.toFile = writeLog
+        }
     }
 
     @Published var gamesFolder: URL? {
@@ -40,6 +49,7 @@ final class GameSettings: ObservableObject {
         self.defaults = defaults
         showOnDiscord = defaults.object(forKey: Self.showKey) as? Bool ?? true
         gamesFolder = defaults.string(forKey: Self.folderKey).map { URL(fileURLWithPath: $0) }
+        writeLog = defaults.bool(forKey: Self.logKey)
         prefs = defaults.data(forKey: Self.prefsKey)
             .flatMap { try? JSONDecoder().decode([String: GamePrefs].self, from: $0) } ?? [:]
         knownTitleIDs = defaults.dictionary(forKey: Self.titleIDsKey) as? [String: String] ?? [:]
