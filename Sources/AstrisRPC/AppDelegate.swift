@@ -35,6 +35,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let gameItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let discordItem = NSMenuItem(title: "", action: #selector(openDiscord), keyEquivalent: "")
     private let enabledItem = NSMenuItem(title: L10n.tr("Afficher sur Discord", "Show on Discord"), action: #selector(toggleEnabled), keyEquivalent: "")
+    private let hideGameItem = NSMenuItem(title: L10n.tr("Masquer ce jeu sur Discord", "Hide This Game on Discord"), action: #selector(toggleHideGame), keyEquivalent: "")
+    private let hotKeys = HotKeys()
     private let settingsItem = NSMenuItem(title: L10n.tr("Réglages…", "Settings…"), action: #selector(openSettings), keyEquivalent: ",")
     private let updateItem = NSMenuItem(title: "", action: #selector(confirmUpdate), keyEquivalent: "")
     private let recentsItem = NSMenuItem(title: L10n.tr("Jeux récents", "Recent Games"), action: nil, keyEquivalent: "")
@@ -66,8 +68,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         setUpMenu()
         // Settings window edits apply right away.
         settingsObserver = settings.objectWillChange.sink { [weak self] _ in
-            DispatchQueue.main.async { self?.tick() }
+            DispatchQueue.main.async {
+                self?.syncHotKeys()
+                self?.tick()
+            }
         }
+        hotKeys.onAction = { [weak self] action in
+            switch action {
+            case .toggleDiscord: self?.toggleEnabled()
+            case .toggleHideGame: self?.toggleHideGame()
+            }
+        }
+        syncHotKeys()
         let center = NSWorkspace.shared.notificationCenter
         center.addObserver(self, selector: #selector(appLaunched(_:)),
                            name: NSWorkspace.didLaunchApplicationNotification, object: nil)
@@ -289,8 +301,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // Settings.
         enabledItem.image = Self.symbol("eye")
+        hideGameItem.image = Self.symbol("eye.slash")
         settingsItem.image = Self.symbol("gearshape")
-        for item in [enabledItem, settingsItem] {
+        for item in [enabledItem, hideGameItem, settingsItem] {
             item.target = self
             menu.addItem(item)
         }
@@ -421,6 +434,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         enabledItem.state = enabled ? .on : .off
+        hideGameItem.isHidden = detector.game == nil
+        hideGameItem.state = detector.romPath.map(settings.isHidden) == true ? .on : .off
+        let shortcutMask: NSEvent.ModifierFlags = [.control, .option, .command]
+        for (item, action) in [(enabledItem, HotKeys.Action.toggleDiscord), (hideGameItem, .toggleHideGame)] {
+            // Shown as a hint; the global hot key does the work.
+            item.keyEquivalent = hotKeys.isRegistered ? HotKeys.keyEquivalent(action) : ""
+            item.keyEquivalentModifierMask = shortcutMask
+        }
         refreshIcon(astrisRunning: astrisRunning)
     }
 
@@ -462,7 +483,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func toggleEnabled() {
         enabled.toggle()
+        Log.shared.add(enabled ? "Presence on" : "Presence off")
         tick()
+    }
+
+    /// Blacklists (or not) the game being played, without opening Settings.
+    @objc private func toggleHideGame() {
+        guard let rom = detector.romPath else { NSSound.beep(); return }
+        settings.setHidden(!settings.isHidden(rom), for: rom)
+        Log.shared.add(settings.isHidden(rom) ? "Current game hidden" : "Current game shown")
+        tick()
+    }
+
+    private func syncHotKeys() {
+        if settings.hotKeysEnabled && !hotKeys.isRegistered {
+            hotKeys.register()
+        } else if !settings.hotKeysEnabled && hotKeys.isRegistered {
+            hotKeys.unregister()
+        }
     }
 
     @objc private func openSettings() {

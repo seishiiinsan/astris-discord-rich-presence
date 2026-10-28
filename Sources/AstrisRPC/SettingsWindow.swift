@@ -95,6 +95,10 @@ struct GeneralSettingsView: View {
                 Toggle(L10n.tr("Ouvrir à la connexion", "Open at Login"), isOn: Binding(
                     get: { openAtLogin },
                     set: setOpenAtLogin))
+                Toggle(isOn: $settings.hotKeysEnabled) {
+                    Text(L10n.tr("Raccourcis clavier globaux", "Global keyboard shortcuts"))
+                    Text(L10n.tr("⌃⌥⌘D afficher sur Discord · ⌃⌥⌘H masquer le jeu en cours", "⌃⌥⌘D show on Discord · ⌃⌥⌘H hide the current game"))
+                }
                 Picker(L10n.tr("Afficher « En pause » après", "Show “Idle” after"), selection: $settings.idleMinutes) {
                     ForEach(GameSettings.idleChoices, id: \.self) { minutes in
                         Text(minutes == 0 ? L10n.tr("Jamais", "Never") : "\(minutes) min").tag(minutes)

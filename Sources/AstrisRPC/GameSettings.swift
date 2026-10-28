@@ -37,6 +37,7 @@ final class GameSettings: ObservableObject {
     private static let buttonLabelKey = "customButtonLabel"
     private static let buttonURLKey = "customButtonURL"
     private static let favoritesKey = "favoriteGames"
+    private static let hotKeysKey = "hotKeys"
 
     private let defaults: UserDefaults
 
@@ -103,6 +104,11 @@ final class GameSettings: ObservableObject {
         if on { favorites.append(romPath) }
     }
 
+    /// ⌃⌥⌘D / ⌃⌥⌘H anywhere in macOS.
+    @Published var hotKeysEnabled: Bool {
+        didSet { defaults.set(hotKeysEnabled, forKey: Self.hotKeysKey) }
+    }
+
     @Published var gamesFolder: URL? {
         didSet { defaults.set(gamesFolder?.path, forKey: Self.folderKey) }
     }
@@ -130,6 +136,7 @@ final class GameSettings: ObservableObject {
         customButtonLabel = defaults.string(forKey: Self.buttonLabelKey)
         customButtonURL = defaults.string(forKey: Self.buttonURLKey)
         favorites = defaults.stringArray(forKey: Self.favoritesKey) ?? []
+        hotKeysEnabled = defaults.object(forKey: Self.hotKeysKey) as? Bool ?? true
         prefs = defaults.data(forKey: Self.prefsKey)
             .flatMap { try? JSONDecoder().decode([String: GamePrefs].self, from: $0) } ?? [:]
         knownTitleIDs = defaults.dictionary(forKey: Self.titleIDsKey) as? [String: String] ?? [:]

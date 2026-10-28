@@ -402,3 +402,13 @@ final class FavoritesTests: XCTestCase {
         XCTAssertTrue(settings.isFavorite("/g/Zelda.nsp"))
     }
 }
+
+final class HotKeysTests: XCTestCase {
+    func testDefaultsAndKeys() throws {
+        let settings = GameSettings(defaults: try XCTUnwrap(UserDefaults(suiteName: "AstrisRPCTests-\(UUID().uuidString)")))
+        XCTAssertTrue(settings.hotKeysEnabled)
+        XCTAssertEqual(HotKeys.keyEquivalent(.toggleDiscord), "d")
+        XCTAssertEqual(HotKeys.keyEquivalent(.toggleHideGame), "h")
+        XCTAssertNotEqual(HotKeys.Action.toggleDiscord.keyCode, HotKeys.Action.toggleHideGame.keyCode)
+    }
+}
