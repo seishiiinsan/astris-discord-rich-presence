@@ -574,3 +574,32 @@ final class NotifierTests: XCTestCase {
         XCTAssertNil(Notifier.weeklySummary([rows[2]], name: \.name))
     }
 }
+
+final class StatsExtrasTests: XCTestCase {
+    func testBucketsSplitSessions() {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "UTC")!
+        let history = PlayHistory(file: nil)
+        let midnight = cal.date(from: DateComponents(year: 2026, month: 10, day: 28))!
+        // 23:30 → 00:30: half on each day.
+        history.update(name: "Zelda", titleID: nil, romPath: "/z.nsp", now: midnight - 1800)
+        stride(from: -1800.0, through: 1800, by: 30).forEach {
+            history.update(name: "Zelda", titleID: nil, romPath: "/z.nsp", now: midnight + $0)
+        }
+        let days = PlayHistory.days(2, now: midnight + 3600, calendar: cal)
+        XCTAssertEqual(days.first?.start, midnight - 86400)
+        XCTAssertEqual(history.totals(in: days).map(\.seconds), [1800, 1800])
+        XCTAssertEqual(PlayHistory.weeks(4, now: midnight, calendar: cal).count, 4)
+    }
+
+    func testCSV() {
+        let history = PlayHistory(file: nil)
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        history.update(name: "Zelda, TOTK", titleID: "0100F2C0115B6000", romPath: "/z.nsp", now: t0)
+        history.update(name: "Zelda, TOTK", titleID: "0100F2C0115B6000", romPath: "/z.nsp", now: t0 + 60)
+        let lines = history.csv { $0.name }.split(separator: "\n")
+        XCTAssertEqual(lines.first, "game,file,title_id,start,end,minutes")
+        XCTAssertTrue(lines[1].hasPrefix("\"Zelda, TOTK\",z.nsp,0100F2C0115B6000,"))
+        XCTAssertTrue(lines[1].hasSuffix(",1"))
+    }
+}

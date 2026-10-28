@@ -1,4 +1,5 @@
 import AppKit
+import Charts
 import ServiceManagement
 import SwiftUI
 import UniformTypeIdentifiers
@@ -627,10 +628,17 @@ struct StatsView: View {
     @ObservedObject var settings: GameSettings
     let covers: CoverResolver
     @State private var confirmClear = false
+    @State private var range = ChartRange.days
+    @State private var order = Order.mostPlayed
+    /// TitleID → time Astris counted, read when the tab opens.
+    @State private var astrisPlayed: [String: TimeInterval] = [:]
+
+    enum ChartRange: Hashable { case days, weeks }
+    enum Order: Hashable { case mostPlayed, recent }
 
     var body: some View {
         let week = PlayHistory.startOfWeek()
-        let rows = history.totals(recentSince: week)
+        let rows = sorted(history.totals(recentSince: week))
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 StatTile(value: PlayHistory.format(history.total(since: week)), label: L10n.tr("Cette semaine", "This week"))
@@ -639,7 +647,7 @@ struct StatsView: View {
                 Divider().frame(height: 40)
                 StatTile(value: "\(rows.count)", label: L10n.tr("Jeux lancés", "Games played"))
             }
-            .padding(.vertical, 16)
+            .padding(.vertical, 12)
             Divider()
             if rows.isEmpty {
                 EmptyStateView(
@@ -649,43 +657,107 @@ struct StatsView: View {
                         "Le temps passé en jeu sur Astris est compté ici à partir de maintenant, sans les pauses.",
                         "Time in game on Astris is counted here from now on, without idle time.")) { EmptyView() }
             } else {
-                List(rows) { row in
-                    HStack(spacing: 10) {
-                        CoverView(titleID: row.titleID, covers: covers, size: 32, customCover: settings.prefs(for: row.rom).customCover)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(settings.displayName(for: row.rom, detected: row.name)).lineLimit(1)
-                            Text(row.lastPlayed.formatted(date: .abbreviated, time: .omitted))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text(PlayHistory.format(row.total)).monospacedDigit()
-                            if row.recent > 0 {
-                                Text(L10n.tr("\(PlayHistory.format(row.recent)) cette semaine", "\(PlayHistory.format(row.recent)) this week"))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                    .padding(.vertical, 2)
-                }
-                .listStyle(.inset)
+                chart.padding(12)
+                Divider()
+                list(rows)
             }
             Divider()
             HStack {
-                Text(L10n.tr("Compté par Astris RPC, hors pauses.", "Counted by Astris RPC, idle time excluded."))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Picker(L10n.tr("Tri", "Sort"), selection: $order) {
+                    Text(L10n.tr("Plus joué", "Most played")).tag(Order.mostPlayed)
+                    Text(L10n.tr("Plus récent", "Most recent")).tag(Order.recent)
+                }
+                .fixedSize()
+                .disabled(rows.isEmpty)
                 Spacer()
+                Button(L10n.tr("Exporter en CSV…", "Export as CSV…"), action: export)
+                    .disabled(rows.isEmpty)
                 Button(L10n.tr("Effacer l'historique…", "Clear History…")) { confirmClear = true }
                     .disabled(rows.isEmpty)
             }
             .padding(10)
         }
-        .frame(width: 700, height: 460)
+        .frame(width: 700, height: 560)
         .confirmationDialog(L10n.tr("Effacer tout l'historique de jeu ?", "Clear all play history?"), isPresented: $confirmClear) {
             Button(L10n.tr("Effacer", "Clear"), role: .destructive) { history.clear() }
+        }
+        .task {
+            let info = await Task.detached { GameDetector.astrisGameInfo() }.value
+            astrisPlayed = info.compactMapValues(\.played)
+        }
+    }
+
+    private var chart: some View {
+        let buckets = range == .days
+            ? history.totals(in: PlayHistory.days(7))
+            : history.totals(in: PlayHistory.weeks(4))
+        return VStack(alignment: .leading, spacing: 8) {
+            Picker("", selection: $range) {
+                Text(L10n.tr("7 jours", "7 days")).tag(ChartRange.days)
+                Text(L10n.tr("4 semaines", "4 weeks")).tag(ChartRange.weeks)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            Chart(buckets) { bucket in
+                BarMark(
+                    x: .value(L10n.tr("Période", "Period"), bucket.start, unit: range == .days ? .day : .weekOfYear),
+                    y: .value(L10n.tr("Heures", "Hours"), bucket.seconds / 3600))
+                    .foregroundStyle(Color.accentColor)
+            }
+            .chartYAxisLabel(L10n.tr("heures", "hours"))
+            .frame(height: 110)
+            .accessibilityLabel(L10n.tr("Temps de jeu par période", "Play time per period"))
+        }
+    }
+
+    private func list(_ rows: [PlayHistory.GameTotal]) -> some View {
+        List(rows) { row in
+            HStack(spacing: 10) {
+                CoverView(titleID: row.titleID, covers: covers, size: 32, customCover: settings.prefs(for: row.rom).customCover)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(settings.displayName(for: row.rom, detected: row.name)).lineLimit(1)
+                    Text(row.lastPlayed.formatted(date: .abbreviated, time: .omitted))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(PlayHistory.format(row.total)).monospacedDigit()
+                    Text(detail(row))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.vertical, 2)
+        }
+        .listStyle(.inset)
+    }
+
+    /// "2 h 05 cette semaine · Astris : 120 h 00"
+    private func detail(_ row: PlayHistory.GameTotal) -> String {
+        var parts: [String] = []
+        if row.recent > 0 { parts.append(L10n.tr("\(PlayHistory.format(row.recent)) cette semaine", "\(PlayHistory.format(row.recent)) this week")) }
+        if let id = row.titleID, let astris = astrisPlayed[id], astris >= 60 {
+            parts.append("Astris : \(PlayHistory.format(astris))")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private func sorted(_ rows: [PlayHistory.GameTotal]) -> [PlayHistory.GameTotal] {
+        order == .recent ? rows.sorted { $0.lastPlayed > $1.lastPlayed } : rows
+    }
+
+    private func export() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.commaSeparatedText]
+        panel.nameFieldStringValue = "astris-sessions.csv"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let csv = history.csv { settings.displayName(for: $0.rom, detected: $0.name) }
+        do {
+            try csv.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            NSAlert(error: error).runModal()
         }
     }
 }
