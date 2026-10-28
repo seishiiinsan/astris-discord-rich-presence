@@ -186,6 +186,7 @@ struct GeneralSettingsView: View {
                 Toggle(L10n.tr("Mise à jour disponible", "Update available"), isOn: $settings.notifyUpdates)
                 Toggle(L10n.tr("Bilan de la semaine (dimanche soir)", "Weekly summary (Sunday evening)"), isOn: $settings.notifyWeeklySummary)
                 Toggle(L10n.tr("Paliers (10, 25, 50, 100 h…) et records de session", "Milestones (10, 25, 50, 100 h…) and session records"), isOn: $settings.notifyMilestones)
+                Toggle(L10n.tr("Batterie de manette faible (20 %)", "Low controller battery (20%)"), isOn: $settings.notifyLowBattery)
                 Picker(L10n.tr("Rappel de pause", "Break reminder"), selection: $settings.breakReminderMinutes) {
                     ForEach(PlayReminders.breakChoices, id: \.self) { minutes in
                         Text(minutes == 0 ? L10n.tr("Jamais", "Never") : PlayHistory.format(TimeInterval(minutes * 60))).tag(minutes)

@@ -49,6 +49,7 @@ final class GameSettings: ObservableObject {
     private static let streamerKey = "streamerMode"
     private static let menuBarTimerKey = "menuBarTimer"
     private static let breakKey = "breakReminderMinutes"
+    private static let lowBatteryKey = "notifyLowBattery"
     private static let milestonesKey = "notifyMilestones"
     private static let milestonesSentKey = "milestonesSent"
     private static let steamGridDBKeyKey = "steamGridDBKey"
@@ -181,6 +182,10 @@ final class GameSettings: ObservableObject {
         didSet { defaults.set(breakReminderMinutes, forKey: Self.breakKey) }
     }
 
+    @Published var notifyLowBattery: Bool {
+        didSet { defaults.set(notifyLowBattery, forKey: Self.lowBatteryKey) }
+    }
+
     @Published var notifyMilestones: Bool {
         didSet { defaults.set(notifyMilestones, forKey: Self.milestonesKey) }
     }
@@ -266,6 +271,7 @@ final class GameSettings: ObservableObject {
         menuBarTimer = defaults.bool(forKey: Self.menuBarTimerKey)
         breakReminderMinutes = defaults.object(forKey: Self.breakKey) as? Int ?? 0
         notifyMilestones = defaults.object(forKey: Self.milestonesKey) as? Bool ?? true
+        notifyLowBattery = defaults.object(forKey: Self.lowBatteryKey) as? Bool ?? true
         steamGridDBKey = defaults.string(forKey: Self.steamGridDBKeyKey)
         preferSteamGridDB = defaults.bool(forKey: Self.preferSteamGridDBKey)
         notifyDiscordLost = defaults.object(forKey: Self.notifyDiscordKey) as? Bool ?? true

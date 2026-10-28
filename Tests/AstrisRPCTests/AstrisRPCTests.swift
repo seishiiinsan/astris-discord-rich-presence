@@ -678,3 +678,16 @@ final class PlayRemindersTests: XCTestCase {
         XCTAssertTrue(settings.markMilestone(25, for: "/g/Zelda.nsp"))
     }
 }
+
+final class ControllersTests: XCTestCase {
+    func testLabelsAndLow() {
+        let low = Controllers.Info(name: "Pro Controller", battery: 0.15, charging: false)
+        XCTAssertEqual(Controllers.label(low), "Pro Controller · 15 %")
+        XCTAssertTrue(Controllers.isLow(low))
+        let charging = Controllers.Info(name: "DualSense", battery: 0.1, charging: true)
+        XCTAssertEqual(Controllers.label(charging), "DualSense · 10 % ⚡︎")
+        XCTAssertFalse(Controllers.isLow(charging))
+        XCTAssertFalse(Controllers.isLow(Controllers.Info(name: "Joy-Con", battery: nil, charging: false)))
+        XCTAssertEqual(Controllers.label(Controllers.Info(name: "Joy-Con", battery: nil, charging: false)), "Joy-Con")
+    }
+}

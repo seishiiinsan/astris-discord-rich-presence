@@ -48,6 +48,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let settingsItem = NSMenuItem(title: L10n.tr("Réglages…", "Settings…"), action: #selector(openSettings), keyEquivalent: ",")
     private let updateItem = NSMenuItem(title: "", action: #selector(confirmUpdate), keyEquivalent: "")
     private let recentsItem = NSMenuItem(title: L10n.tr("Jeux récents", "Recent Games"), action: nil, keyEquivalent: "")
+    private let controllersItem = NSMenuItem(title: L10n.tr("Manettes", "Controllers"), action: nil, keyEquivalent: "")
+    /// Controllers already reported as low, until they charge again.
+    private var lowBatteryNotified: Set<String> = []
     private let favoritesItem = NSMenuItem(title: L10n.tr("Favoris", "Favorites"), action: nil, keyEquivalent: "")
     private let checkItem = NSMenuItem(title: L10n.tr("Rechercher les mises à jour…", "Check for Updates…"), action: #selector(checkForUpdates), keyEquivalent: "")
     private let diagnosticItem = NSMenuItem(title: L10n.tr("Copier le diagnostic", "Copy Diagnostics"), action: #selector(copyDiagnostic), keyEquivalent: "")
@@ -314,6 +317,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let played = isIdle ? nil : detector.game
         history.update(name: played?.name, titleID: played?.titleID, romPath: played == nil ? nil : detector.romPath)
         checkReminders()
+        checkControllerBatteries()
         if isIdle, presence != nil {
             // Paused: no running clock.
             presence?.state = L10n.tr("En pause · Sur Astris", "Idle · On Astris")
@@ -416,6 +420,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         favoritesItem.submenu = NSMenu()
         favoritesItem.isHidden = settings.favorites.isEmpty
         menu.addItem(favoritesItem)
+        controllersItem.image = Self.symbol("gamecontroller")
+        controllersItem.submenu = NSMenu()
+        menu.addItem(controllersItem)
         menu.addItem(.separator())
 
         // Settings.
@@ -454,6 +461,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
         refreshMenu(astrisRunning: astris != nil)
         refreshRecents()
+        refreshControllers()
     }
 
     // MARK: - Recent games
@@ -641,6 +649,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     // MARK: - Notifications
+
+    private func refreshControllers() {
+        let pads = Controllers.current()
+        let submenu = controllersItem.submenu ?? NSMenu()
+        submenu.removeAllItems()
+        controllersItem.isHidden = pads.isEmpty
+        for pad in pads {
+            let item = NSMenuItem(title: Controllers.label(pad), action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            let level = pad.battery ?? 1
+            let symbol = pad.charging ? "battery.100.bolt" : level <= 0.2 ? "battery.25" : level <= 0.6 ? "battery.50" : "battery.100"
+            item.image = Self.symbol(symbol, color: Controllers.isLow(pad) ? .systemRed : nil)
+            submenu.addItem(item)
+        }
+        if let low = pads.first(where: Controllers.isLow) {
+            controllersItem.title = L10n.tr("Manettes — batterie faible", "Controllers — low battery")
+            controllersItem.toolTip = Controllers.label(low)
+        } else {
+            controllersItem.title = L10n.tr("Manettes", "Controllers")
+            controllersItem.toolTip = nil
+        }
+    }
+
+    private func checkControllerBatteries() {
+        let pads = Controllers.current()
+        for pad in pads where !Controllers.isLow(pad) { lowBatteryNotified.remove(pad.name) }
+        guard settings.notifyLowBattery else { return }
+        for pad in pads where Controllers.isLow(pad) && !lowBatteryNotified.contains(pad.name) {
+            lowBatteryNotified.insert(pad.name)
+            notifier.send(id: "battery-\(pad.name)", title: L10n.tr("Batterie faible", "Low battery"),
+                          body: L10n.tr("\(Controllers.label(pad)) : pense à la recharger.", "\(Controllers.label(pad)): time to charge it."))
+            Log.shared.add("Low battery: \(Controllers.label(pad))")
+        }
+    }
 
     private var lastBreakReminder: Date?
     private var lastMilestoneTotal: (rom: String, seconds: TimeInterval)?
