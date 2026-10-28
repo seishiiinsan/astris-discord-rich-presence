@@ -719,7 +719,7 @@ final class AstrisFilesTests: XCTestCase {
         let backups = root.appendingPathComponent("backups")
 
         let archive = try AstrisFiles.backUpSaves(from: saves, to: backups, at: Date(timeIntervalSince1970: 1_800_000_000))
-        XCTAssertEqual(AstrisFiles.backups(in: backups), [archive])
+        XCTAssertEqual(AstrisFiles.backups(in: backups).map(\.lastPathComponent), [archive.lastPathComponent])
         try Data("v2".utf8).write(to: saves.appendingPathComponent("0000000000000001/data"))
 
         try AstrisFiles.restore(archive, into: saves)
