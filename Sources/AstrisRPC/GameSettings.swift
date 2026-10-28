@@ -15,6 +15,9 @@ final class GameSettings: ObservableObject {
     private static let prefsKey = "gamePrefs"
     private static let titleIDsKey = "knownTitleIDs"
     private static let logKey = "writeLog"
+    private static let idleKey = "idleMinutes"
+
+    static let idleChoices = [0, 5, 10, 15, 30]
 
     private let defaults: UserDefaults
 
@@ -28,6 +31,11 @@ final class GameSettings: ObservableObject {
             defaults.set(writeLog, forKey: Self.logKey)
             Log.shared.toFile = writeLog
         }
+    }
+
+    /// Show "Idle" on Discord after this many minutes without input (0: never).
+    @Published var idleMinutes: Int {
+        didSet { defaults.set(idleMinutes, forKey: Self.idleKey) }
     }
 
     @Published var gamesFolder: URL? {
@@ -50,6 +58,7 @@ final class GameSettings: ObservableObject {
         showOnDiscord = defaults.object(forKey: Self.showKey) as? Bool ?? true
         gamesFolder = defaults.string(forKey: Self.folderKey).map { URL(fileURLWithPath: $0) }
         writeLog = defaults.bool(forKey: Self.logKey)
+        idleMinutes = defaults.object(forKey: Self.idleKey) as? Int ?? 15
         prefs = defaults.data(forKey: Self.prefsKey)
             .flatMap { try? JSONDecoder().decode([String: GamePrefs].self, from: $0) } ?? [:]
         knownTitleIDs = defaults.dictionary(forKey: Self.titleIDsKey) as? [String: String] ?? [:]

@@ -12,6 +12,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let covers = CoverResolver()
     private let eShop = EShopResolver()
     private let recents = RecentGames()
+    private let idle = IdleMonitor()
+    private var isIdle = false
     private var thumbnails: [String: NSImage] = [:]
     private var loadingThumbnails: Set<String> = []
     private let updater = Updater()
@@ -164,6 +166,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     image: Self.astrisLogo, imageText: "Astris",
                     buttons: [("Astris", Self.astrisURL)])
             }
+        }
+
+        let wasIdle = isIdle
+        isIdle = detector.game != nil && IdleMonitor.isIdle(idleTime: idle.idleTime, afterMinutes: settings.idleMinutes)
+        if isIdle != wasIdle { Log.shared.add(isIdle ? "Idle" : "Back from idle") }
+        if isIdle, presence != nil {
+            // Paused: no running clock.
+            presence?.state = L10n.tr("En pause · Sur Astris", "Idle · On Astris")
+            presence?.start = nil
         }
 
         lastPresence = presence
@@ -347,7 +358,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             gameItem.image = Self.symbol("gamecontroller")
         }
         if #available(macOS 14.4, *) {
-            gameItem.subtitle = detector.game?.playedTime.flatMap(Self.formatPlayed).map { L10n.tr("\($0) jouées avant cette session", "\($0) played before this session") }
+            gameItem.subtitle = isIdle
+                ? L10n.tr("En pause sur Discord", "Idle on Discord")
+                : detector.game?.playedTime.flatMap(Self.formatPlayed).map { L10n.tr("\($0) jouées avant cette session", "\($0) played before this session") }
         }
 
         // Discord row doubles as the fix: click to open Discord when it isn't running.
@@ -452,6 +465,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             lines.append("TitleID: \(game.titleID ?? "none")")
             lines.append("ROM: \(detector.romPath.map { ($0 as NSString).lastPathComponent } ?? "?")")
             lines.append("Played before: \(game.playedTime.flatMap(Self.formatPlayed) ?? "unknown")")
+            lines.append("Idle: \(isIdle) (\(Int(idle.idleTime)) s without input, threshold \(settings.idleMinutes) min)")
             if let id = game.titleID {
                 lines.append("Cover: \(covers.cover(for: id) ?? "none yet")")
                 lines.append("Cover sources: " + CoverResolver.candidates(for: id).joined(separator: ", "))

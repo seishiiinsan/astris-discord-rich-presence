@@ -259,3 +259,16 @@ final class LogTests: XCTestCase {
         XCTAssertEqual(log.recent.count, Log.limit)
     }
 }
+
+final class IdleTests: XCTestCase {
+    func testIsIdle() {
+        XCTAssertFalse(IdleMonitor.isIdle(idleTime: 3600, afterMinutes: 0), "0 = never")
+        XCTAssertFalse(IdleMonitor.isIdle(idleTime: 299, afterMinutes: 5))
+        XCTAssertTrue(IdleMonitor.isIdle(idleTime: 300, afterMinutes: 5))
+    }
+
+    func testIdleDefaultsTo15Minutes() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "AstrisRPCTests-\(UUID().uuidString)"))
+        XCTAssertEqual(GameSettings(defaults: defaults).idleMinutes, 15)
+    }
+}

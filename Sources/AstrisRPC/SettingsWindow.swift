@@ -80,10 +80,15 @@ struct GeneralSettingsView: View {
                 Toggle(L10n.tr("Ouvrir à la connexion", "Open at Login"), isOn: Binding(
                     get: { openAtLogin },
                     set: setOpenAtLogin))
+                Picker(L10n.tr("Afficher « En pause » après", "Show “Idle” after"), selection: $settings.idleMinutes) {
+                    ForEach(GameSettings.idleChoices, id: \.self) { minutes in
+                        Text(minutes == 0 ? L10n.tr("Jamais", "Never") : "\(minutes) min").tag(minutes)
+                    }
+                }
             } footer: {
                 Text(L10n.tr(
-                    "Tes amis voient le jeu, sa jaquette et ton temps de jeu.",
-                    "Friends see the game, its cover art and your play time."))
+                    "Tes amis voient le jeu, sa jaquette et ton temps de jeu. Sans clavier, souris ni manette pendant le délai choisi, Discord affiche « En pause ».",
+                    "Friends see the game, its cover art and your play time. With no keyboard, mouse or controller input for the chosen delay, Discord shows “Idle”."))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
