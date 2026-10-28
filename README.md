@@ -8,6 +8,8 @@ App macOS de barre de menus qui ajoute le Discord Rich Presence à [Astris](http
 **En pause** : sans clavier, souris ni manette pendant 15 min (réglable), « En pause · Sur Astris », sans chrono.
 **Dans le menu d'Astris** : « Dans le menu » avec le logo Astris.
 
+📖 **[Toutes les fonctionnalités](docs/FONCTIONNALITES.md)**
+
 ## Installation
 
 1. Télécharger `AstrisRPC.dmg` depuis les [Releases](https://github.com/seishiiinsan/astris-discord-rich-presence/releases).
