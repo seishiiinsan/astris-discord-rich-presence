@@ -650,3 +650,31 @@ final class MenuBarTimerTests: XCTestCase {
         XCTAssertNil(history.currentSessionStart)
     }
 }
+
+final class PlayRemindersTests: XCTestCase {
+    func testBreak() {
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        XCTAssertFalse(PlayReminders.isBreakDue(sessionStart: start, now: start + 7000, everyMinutes: 0, lastReminder: nil), "off")
+        XCTAssertFalse(PlayReminders.isBreakDue(sessionStart: start, now: start + 7100, everyMinutes: 120, lastReminder: nil))
+        XCTAssertTrue(PlayReminders.isBreakDue(sessionStart: start, now: start + 7200, everyMinutes: 120, lastReminder: nil))
+        XCTAssertFalse(PlayReminders.isBreakDue(sessionStart: start, now: start + 8000, everyMinutes: 120, lastReminder: start + 7200))
+        XCTAssertTrue(PlayReminders.isBreakDue(sessionStart: start, now: start + 14400, everyMinutes: 120, lastReminder: start + 7200))
+        XCTAssertTrue(PlayReminders.isBreakDue(sessionStart: start, now: start + 7200, everyMinutes: 120, lastReminder: start - 10), "older session")
+    }
+
+    func testMilestonesAndRecord() {
+        XCTAssertEqual(PlayReminders.crossedMilestone(from: 9.9 * 3600, to: 10 * 3600), 10)
+        XCTAssertNil(PlayReminders.crossedMilestone(from: 10 * 3600, to: 11 * 3600))
+        XCTAssertEqual(PlayReminders.crossedMilestone(from: 0, to: 30 * 3600), 25, "biggest one passed")
+        XCTAssertTrue(PlayReminders.beatsRecord(current: 3601, previousCurrent: 3599, record: 3600))
+        XCTAssertFalse(PlayReminders.beatsRecord(current: 3700, previousCurrent: 3650, record: 3600), "only once")
+        XCTAssertFalse(PlayReminders.beatsRecord(current: 900, previousCurrent: 0, record: 600), "too short")
+    }
+
+    func testMilestoneSentOnce() throws {
+        let settings = GameSettings(defaults: try XCTUnwrap(UserDefaults(suiteName: "AstrisRPCTests-\(UUID().uuidString)")))
+        XCTAssertTrue(settings.markMilestone(10, for: "/g/Zelda.nsp"))
+        XCTAssertFalse(settings.markMilestone(10, for: "/other/Zelda.nsp"))
+        XCTAssertTrue(settings.markMilestone(25, for: "/g/Zelda.nsp"))
+    }
+}

@@ -48,6 +48,9 @@ final class GameSettings: ObservableObject {
     private static let importedFavoritesKey = "importedAstrisFavorites"
     private static let streamerKey = "streamerMode"
     private static let menuBarTimerKey = "menuBarTimer"
+    private static let breakKey = "breakReminderMinutes"
+    private static let milestonesKey = "notifyMilestones"
+    private static let milestonesSentKey = "milestonesSent"
     private static let steamGridDBKeyKey = "steamGridDBKey"
     private static let preferSteamGridDBKey = "preferSteamGridDB"
     private static let notifyDiscordKey = "notifyDiscordLost"
@@ -173,6 +176,23 @@ final class GameSettings: ObservableObject {
         didSet { defaults.set(menuBarTimer, forKey: Self.menuBarTimerKey) }
     }
 
+    /// "You've been playing for 2 h" every this many minutes (0: off).
+    @Published var breakReminderMinutes: Int {
+        didSet { defaults.set(breakReminderMinutes, forKey: Self.breakKey) }
+    }
+
+    @Published var notifyMilestones: Bool {
+        didSet { defaults.set(notifyMilestones, forKey: Self.milestonesKey) }
+    }
+
+    /// "Zelda.nsp:50": each milestone notified once per game.
+    func markMilestone(_ hours: Int, for romPath: String) -> Bool {
+        var sent = Set(defaults.stringArray(forKey: Self.milestonesSentKey) ?? [])
+        let inserted = sent.insert("\(Self.key(for: romPath)):\(hours)").inserted
+        if inserted { defaults.set(Array(sent).sorted(), forKey: Self.milestonesSentKey) }
+        return inserted
+    }
+
     @Published var notifyDiscordLost: Bool {
         didSet { defaults.set(notifyDiscordLost, forKey: Self.notifyDiscordKey) }
     }
@@ -244,6 +264,8 @@ final class GameSettings: ObservableObject {
         hotKeysEnabled = defaults.object(forKey: Self.hotKeysKey) as? Bool ?? true
         streamerMode = defaults.bool(forKey: Self.streamerKey)
         menuBarTimer = defaults.bool(forKey: Self.menuBarTimerKey)
+        breakReminderMinutes = defaults.object(forKey: Self.breakKey) as? Int ?? 0
+        notifyMilestones = defaults.object(forKey: Self.milestonesKey) as? Bool ?? true
         steamGridDBKey = defaults.string(forKey: Self.steamGridDBKeyKey)
         preferSteamGridDB = defaults.bool(forKey: Self.preferSteamGridDBKey)
         notifyDiscordLost = defaults.object(forKey: Self.notifyDiscordKey) as? Bool ?? true

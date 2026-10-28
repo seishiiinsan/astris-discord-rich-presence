@@ -313,6 +313,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if isIdle != wasIdle { Log.shared.add(isIdle ? "Idle" : "Back from idle") }
         let played = isIdle ? nil : detector.game
         history.update(name: played?.name, titleID: played?.titleID, romPath: played == nil ? nil : detector.romPath)
+        checkReminders()
         if isIdle, presence != nil {
             // Paused: no running clock.
             presence?.state = L10n.tr("En pause · Sur Astris", "Idle · On Astris")
@@ -640,6 +641,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     // MARK: - Notifications
+
+    private var lastBreakReminder: Date?
+    private var lastMilestoneTotal: (rom: String, seconds: TimeInterval)?
+    private var lastSessionLength: TimeInterval = 0
+
+    /// Break reminder, play-time milestones and session record, checked at each poll.
+    private func checkReminders(now: Date = Date()) {
+        let start = history.currentSessionStart
+        if PlayReminders.isBreakDue(sessionStart: start, now: now, everyMinutes: settings.breakReminderMinutes, lastReminder: lastBreakReminder),
+           let start {
+            lastBreakReminder = now
+            notifier.send(
+                id: "break",
+                title: L10n.tr("Petite pause ?", "Time for a break?"),
+                body: L10n.tr("Tu joues depuis \(PlayHistory.format(now.timeIntervalSince(start))). Bois un verre d'eau, étire-toi.",
+                              "You've been playing for \(PlayHistory.format(now.timeIntervalSince(start))). Drink some water, stretch."))
+        }
+
+        let session = start.map { now.timeIntervalSince($0) } ?? 0
+        defer { lastSessionLength = session }
+        guard settings.notifyMilestones, let game = detector.game, let rom = detector.romPath, start != nil else {
+            lastMilestoneTotal = nil
+            return
+        }
+        let name = settings.displayName(for: rom, detected: game.name)
+        let total = (game.playedTime ?? 0) + now.timeIntervalSince(game.start)
+        if let last = lastMilestoneTotal, last.rom == rom,
+           let hours = PlayReminders.crossedMilestone(from: last.seconds, to: total),
+           settings.markMilestone(hours, for: rom) {
+            notifier.send(id: "milestone-\(hours)", title: L10n.tr("\(hours) h sur \(name) 🎉", "\(hours) h on \(name) 🎉"),
+                          body: L10n.tr("Un palier de plus.", "Another milestone."))
+            Log.shared.add("Milestone: \(hours) h on \(name)")
+        }
+        lastMilestoneTotal = (rom, total)
+        if PlayReminders.beatsRecord(current: session, previousCurrent: lastSessionLength, record: history.longestPastSession) {
+            notifier.send(id: "record", title: L10n.tr("Record de session !", "Session record!"),
+                          body: L10n.tr("Plus longue session jamais comptée, sur \(name).", "Longest session ever counted, on \(name)."))
+        }
+    }
 
     private func notifyDiscordLost() {
         guard settings.notifyDiscordLost else { return }

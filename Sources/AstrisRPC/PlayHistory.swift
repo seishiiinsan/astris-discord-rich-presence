@@ -60,6 +60,11 @@ final class PlayHistory: ObservableObject {
         save()
     }
 
+    /// Longest session, the one being played left out.
+    var longestPastSession: TimeInterval {
+        (open ? sessions.dropLast() : sessions[...]).map(\.duration).max() ?? 0
+    }
+
     /// Start of the session being played (nil when none, or idle).
     var currentSessionStart: Date? {
         open ? sessions.last?.start : nil
