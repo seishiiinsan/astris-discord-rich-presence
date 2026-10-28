@@ -368,3 +368,23 @@ final class VersionTests: XCTestCase {
         XCTAssertNil(assets?["small_text"])
     }
 }
+
+final class CustomCoverTests: XCTestCase {
+    func testOldPrefsStillDecode() throws {
+        let old = Data(#"{"Mario.xcz": {"hidden": true}}"#.utf8)
+        let prefs = try JSONDecoder().decode([String: GameSettings.GamePrefs].self, from: old)
+        XCTAssertEqual(prefs["Mario.xcz"]?.hidden, true)
+        XCTAssertNil(prefs["Mario.xcz"]?.customCover)
+    }
+
+    func testOnlyWebCoversGoToDiscord() throws {
+        let settings = GameSettings(defaults: try XCTUnwrap(UserDefaults(suiteName: "AstrisRPCTests-\(UUID().uuidString)")))
+        settings.setCustomCover("https://x/cover.png", for: "/g/Homebrew.nro")
+        XCTAssertEqual(settings.discordCover(for: "/moved/Homebrew.nro"), "https://x/cover.png")
+        settings.setCustomCover("file:///tmp/cover.png", for: "/g/Homebrew.nro")
+        XCTAssertNil(settings.discordCover(for: "/g/Homebrew.nro"))
+        XCTAssertEqual(settings.prefs(for: "/g/Homebrew.nro").customCover, "file:///tmp/cover.png")
+        settings.setCustomCover("  ", for: "/g/Homebrew.nro")
+        XCTAssertTrue(settings.prefs.isEmpty)
+    }
+}

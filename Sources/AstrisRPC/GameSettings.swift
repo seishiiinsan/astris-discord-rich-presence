@@ -6,6 +6,18 @@ final class GameSettings: ObservableObject {
     struct GamePrefs: Codable, Equatable {
         var hidden = false
         var customName: String?
+        /// https URL (shown on Discord too) or file URL of an image copied in Application Support (shown here only).
+        var customCover: String?
+
+        init() {}
+
+        // New fields must not break settings saved by older versions.
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            hidden = try c.decodeIfPresent(Bool.self, forKey: .hidden) ?? false
+            customName = try c.decodeIfPresent(String.self, forKey: .customName)
+            customCover = try c.decodeIfPresent(String.self, forKey: .customCover)
+        }
     }
 
     static let shared = GameSettings()
@@ -136,6 +148,34 @@ final class GameSettings: ObservableObject {
     func setCustomName(_ name: String?, for romPath: String) {
         let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines)
         update(romPath) { $0.customName = (trimmed?.isEmpty ?? true) ? nil : trimmed }
+    }
+
+    /// Web covers show on Discord; local ones only in the app.
+    func discordCover(for romPath: String) -> String? {
+        prefs(for: romPath).customCover.flatMap { Presence.isWebURL($0, max: 256) ? $0 : nil }
+    }
+
+    func setCustomCover(_ link: String?, for romPath: String) {
+        let trimmed = link?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let old = prefs(for: romPath).customCover
+        update(romPath) { $0.customCover = (trimmed?.isEmpty ?? true) ? nil : trimmed }
+        // Drop the copy of a replaced local image.
+        if let old, old != prefs(for: romPath).customCover, let url = URL(string: old), url.isFileURL,
+           url.path.hasPrefix(Self.coversFolder?.path ?? "/nonexistent") {
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+    static let coversFolder = AppPaths.support?.appendingPathComponent("Covers", isDirectory: true)
+
+    /// Copies a picked image next to the settings, so it survives moving or deleting the original.
+    func importCover(from file: URL, for romPath: String) throws {
+        guard let folder = Self.coversFolder else { throw CocoaError(.fileWriteUnknown) }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let name = ImageCache.fileName(for: Self.key(for: romPath) + UUID().uuidString) + "." + (file.pathExtension.isEmpty ? "png" : file.pathExtension)
+        let target = folder.appendingPathComponent(name)
+        try FileManager.default.copyItem(at: file, to: target)
+        setCustomCover(target.absoluteString, for: romPath)
     }
 
     private func update(_ romPath: String, _ change: (inout GamePrefs) -> Void) {

@@ -163,7 +163,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     buttons.append((L10n.tr("Voir sur l'eShop", "View on eShop"), eShop.url(titleID: game.titleID, name: game.name)))
                 }
                 buttons.append(settings.customButton ?? ("Astris", Self.astrisURL))
-                let cover = game.titleID.flatMap(covers.cover(for:))
+                let cover = detector.romPath.flatMap(settings.discordCover(for:)) ?? game.titleID.flatMap(covers.cover(for:))
                 presence = Presence(
                     details: PresenceTemplate.render(Self.template(settings.detailsTemplate, PresenceTemplate.defaultDetails), values: values) ?? name,
                     state: PresenceTemplate.render(Self.template(settings.stateTemplate, PresenceTemplate.defaultState), values: values),
@@ -330,9 +330,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             item.representedObject = entry.romPath
             item.toolTip = entry.romPath
             item.isEnabled = FileManager.default.fileExists(atPath: entry.romPath)
-            if let id = entry.titleID {
+            if let custom = settings.prefs(for: entry.romPath).customCover {
+                item.image = thumbnails[custom] ?? Self.symbol("gamecontroller")
+                loadThumbnail(key: custom, link: custom)
+            } else if let id = entry.titleID {
                 item.image = thumbnails[id] ?? Self.symbol("gamecontroller")
-                loadThumbnail(id)
+                if let link = covers.cover(for: id) { loadThumbnail(key: id, link: link) }
             } else {
                 item.image = Self.symbol("gamecontroller")
             }
@@ -341,16 +344,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// Loads the cover (from the disk cache when possible) and keeps a menu-sized copy.
-    private func loadThumbnail(_ titleID: String) {
-        guard thumbnails[titleID] == nil, !loadingThumbnails.contains(titleID),
-              let link = covers.cover(for: titleID) else { return }
-        loadingThumbnails.insert(titleID)
+    private func loadThumbnail(key: String, link: String) {
+        guard thumbnails[key] == nil, !loadingThumbnails.contains(key) else { return }
+        loadingThumbnails.insert(key)
         ImageCache.shared.image(for: link) { [weak self] image in
             guard let self else { return }
-            loadingThumbnails.remove(titleID)
+            loadingThumbnails.remove(key)
             guard let thumb = image?.copy() as? NSImage else { return }
             thumb.size = NSSize(width: 20, height: 20)
-            thumbnails[titleID] = thumb
+            thumbnails[key] = thumb
         }
     }
 

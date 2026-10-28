@@ -1,6 +1,7 @@
 import AppKit
 import ServiceManagement
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Native macOS Settings window: toolbar tabs (General, Games), opened with ⌘,.
 final class SettingsWindowController: NSWindowController {
@@ -349,7 +350,7 @@ private struct GameRow: View {
     var body: some View {
         let hidden = settings.isHidden(game.url.path)
         HStack(spacing: 10) {
-            CoverView(titleID: game.titleID, covers: covers, size: 32)
+            CoverView(titleID: game.titleID, covers: covers, size: 32, customCover: settings.prefs(for: game.url.path).customCover)
                 .opacity(hidden ? 0.45 : 1)
             VStack(alignment: .leading, spacing: 2) {
                 Text(settings.displayName(for: game.url.path, detected: game.name))
@@ -377,6 +378,7 @@ private struct GameDetailView: View {
     @ObservedObject var settings: GameSettings
     let covers: CoverResolver
     @State private var name = ""
+    @State private var coverLink = ""
 
     private var path: String { game.url.path }
 
@@ -392,8 +394,14 @@ private struct GameDetailView: View {
     var body: some View {
         VStack(spacing: 0) {
             VStack(spacing: 10) {
-                CoverView(titleID: game.titleID, covers: covers, size: 112)
+                CoverView(titleID: game.titleID, covers: covers, size: 112, customCover: settings.prefs(for: path).customCover)
                     .shadow(color: .black.opacity(0.2), radius: 8, y: 4)
+                    .dropDestination(for: URL.self) { urls, _ in
+                        guard let url = urls.first else { return false }
+                        useCover(url)
+                        return true
+                    }
+                    .help(L10n.tr("Glisse une image ici pour changer la jaquette", "Drop an image here to change the cover"))
                 Text(settings.displayName(for: path, detected: game.name))
                     .font(.title2.weight(.semibold))
                     .multilineTextAlignment(.center)
@@ -429,6 +437,27 @@ private struct GameDetailView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 Section {
+                    HStack {
+                        TextField(L10n.tr("Jaquette", "Cover"), text: $coverLink, prompt: Text("https://…"))
+                            .onSubmit { settings.setCustomCover(coverLink, for: path) }
+                        Button(L10n.tr("Choisir…", "Choose…"), action: pickCover)
+                        if settings.prefs(for: path).customCover != nil {
+                            Button(L10n.tr("Par défaut", "Default")) {
+                                settings.setCustomCover(nil, for: path)
+                                coverLink = ""
+                            }
+                        }
+                    }
+                } footer: {
+                    Text(isLocalCover
+                         ? L10n.tr("Image locale : visible ici seulement. Discord n'affiche que des images en ligne (https).",
+                                   "Local image: shown here only. Discord only shows online images (https).")
+                         : L10n.tr("Adresse d'une image en ligne, ou glisse une image sur la jaquette.",
+                                   "Address of an online image, or drop an image on the cover."))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                Section {
                     TextField(L10n.tr("Nom affiché", "Display name"), text: $name, prompt: Text(game.name))
                         .onSubmit { settings.setCustomName(name, for: path) }
                         .onChange(of: name) { settings.setCustomName($0, for: path) }
@@ -440,7 +469,6 @@ private struct GameDetailView: View {
                 }
             }
             .formStyle(.grouped)
-            .scrollDisabled(true)
 
             HStack {
                 Button(L10n.tr("Afficher dans le Finder", "Show in Finder")) {
@@ -450,7 +478,36 @@ private struct GameDetailView: View {
             }
             .padding([.horizontal, .bottom], 20)
         }
-        .onAppear { name = settings.prefs(for: path).customName ?? "" }
+        .onAppear {
+            name = settings.prefs(for: path).customName ?? ""
+            let cover = settings.prefs(for: path).customCover
+            coverLink = cover.flatMap { URL(string: $0)?.isFileURL == true ? nil : $0 } ?? ""
+        }
+    }
+
+    private var isLocalCover: Bool {
+        settings.prefs(for: path).customCover.flatMap { URL(string: $0)?.isFileURL } ?? false
+    }
+
+    private func pickCover() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = false
+        if panel.runModal() == .OK, let url = panel.url { useCover(url) }
+    }
+
+    private func useCover(_ url: URL) {
+        if url.isFileURL {
+            do {
+                try settings.importCover(from: url, for: path)
+                coverLink = ""
+            } catch {
+                NSAlert(error: error).runModal()
+            }
+        } else {
+            settings.setCustomCover(url.absoluteString, for: path)
+            coverLink = url.absoluteString
+        }
     }
 }
 
@@ -485,7 +542,7 @@ struct StatsView: View {
             } else {
                 List(rows) { row in
                     HStack(spacing: 10) {
-                        CoverView(titleID: row.titleID, covers: covers, size: 32)
+                        CoverView(titleID: row.titleID, covers: covers, size: 32, customCover: settings.prefs(for: row.rom).customCover)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(settings.displayName(for: row.rom, detected: row.name)).lineLimit(1)
                             Text(row.lastPlayed.formatted(date: .abbreviated, time: .omitted))
@@ -543,6 +600,8 @@ private struct CoverView: View {
     let titleID: String?
     let covers: CoverResolver
     let size: CGFloat
+    /// Overrides the resolved cover (https or file URL).
+    var customCover: String? = nil
     @State private var image: NSImage?
 
     var body: some View {
@@ -559,20 +618,29 @@ private struct CoverView: View {
         .frame(width: size, height: size)
         .clipShape(shape)
         .accessibilityHidden(true)
-        .task(id: titleID) { await resolve() }
+        .task(id: (customCover ?? "") + (titleID ?? "")) { await resolve() }
     }
 
     /// The resolver checks candidate URLs in the background: ask again for a few seconds.
     private func resolve() async {
+        image = nil
+        if let customCover {
+            image = await Self.load(customCover)
+            return
+        }
         guard let titleID else { return }
         for _ in 0..<20 {
             if let link = covers.cover(for: titleID) {
-                image = await withCheckedContinuation { done in
-                    ImageCache.shared.image(for: link) { done.resume(returning: $0) }
-                }
+                image = await Self.load(link)
                 return
             }
             try? await Task.sleep(nanoseconds: 300_000_000)
+        }
+    }
+
+    private static func load(_ link: String) async -> NSImage? {
+        await withCheckedContinuation { done in
+            ImageCache.shared.image(for: link) { done.resume(returning: $0) }
         }
     }
 }
