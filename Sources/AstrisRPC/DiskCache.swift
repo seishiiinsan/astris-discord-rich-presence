@@ -108,7 +108,7 @@ final class ImageCache {
         session.dataTask(with: url) { [weak self] data, response, _ in
             let ok = ((response as? HTTPURLResponse)?.statusCode).map { (200..<300).contains($0) } ?? false
             let image = ok ? data.flatMap(NSImage.init(data:)) : nil
-            if let image, let data, let file { try? data.write(to: file, options: .atomic) }
+            if image != nil, let data, let file { try? data.write(to: file, options: .atomic) }
             DispatchQueue.main.async {
                 if let image { self?.memory.setObject(image, forKey: link as NSString) }
                 completion(image)

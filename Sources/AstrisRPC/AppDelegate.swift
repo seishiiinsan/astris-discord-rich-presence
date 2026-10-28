@@ -139,7 +139,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let known = settings.knownTitleIDs
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let library = GameLibrary.scan(folder, known: known)
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 let all = library.map { (path: $0.url.path, name: settings.displayName(for: $0.url.path, detected: $0.name)) }
                 if let path = URLCommand.match(name, in: all) {
@@ -181,7 +181,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let favorites = Set(info.filter { $0.value.favorite }.keys)
             guard !favorites.isEmpty else { return }
             let games = GameLibrary.scan(folder, known: known, titles: GameDetector.metadataTitleIndex())
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 let added = settings.importAstrisFavorites(games, astrisFavorites: favorites)
                 if added > 0 { Log.shared.add("Imported \(added) favorite(s) from Astris") }
