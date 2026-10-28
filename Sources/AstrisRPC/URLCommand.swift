@@ -13,8 +13,9 @@ enum URLCommand: Equatable {
     /// astrisrpc://on | off | toggle | hide-game | streamer[?on=1|0] | launch?game=Zelda | settings
     static func parse(_ url: URL) -> URLCommand? {
         guard url.scheme?.lowercased() == scheme else { return nil }
-        // "astrisrpc://toggle" puts the command in the host, "astrisrpc:toggle" in the path.
-        let name = (url.host ?? url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))).lowercased()
+        // "astrisrpc://toggle" or "astrisrpc:toggle" (no host, no path for Foundation): read the text itself.
+        let rest = url.absoluteString.dropFirst(scheme.count + 1).drop { $0 == "/" }
+        let name = String(rest.prefix { $0 != "?" && $0 != "/" && $0 != "#" }).lowercased()
         let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
         func value(_ key: String) -> String? { query.first { $0.name == key }?.value }
         switch name {
