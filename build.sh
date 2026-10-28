@@ -3,6 +3,8 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 VERSION="${VERSION:-$(tr -d "[:space:]" < VERSION)}"
+# "Developer ID Application: …" to sign for notarization; "-" (ad hoc) otherwise.
+SIGN_IDENTITY="${SIGN_IDENTITY:--}"
 
 swift build -c release --arch arm64
 APP=build/AstrisRPC.app
@@ -39,5 +41,10 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-codesign --force --sign - "$APP"
+if [[ "$SIGN_IDENTITY" == "-" ]]; then
+    codesign --force --sign - "$APP"
+else
+    # Hardened runtime + secure timestamp: required by notarization.
+    codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$APP"
+fi
 echo "OK: $APP  (copie dans /Applications : cp -R $APP /Applications/)"
