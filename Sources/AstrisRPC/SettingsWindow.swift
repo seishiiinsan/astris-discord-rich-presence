@@ -500,6 +500,7 @@ private struct GameRow: View {
     @ObservedObject var settings: GameSettings
     let covers: CoverResolver
     var duplicate = false
+    @ObservedObject private var updates = GameUpdates.shared
 
     var body: some View {
         let hidden = settings.isHidden(game.url.path)
@@ -514,6 +515,7 @@ private struct GameRow: View {
                     hidden ? L10n.tr("Masqué sur Discord", "Hidden on Discord") : nil,
                     settings.prefs(for: game.url.path).status?.label,
                     duplicate ? L10n.tr("Doublon", "Duplicate") : nil,
+                    newerBuild.map { L10n.tr("Mise à jour dispo (\(GameUpdates.label($0)))", "Update available (\(GameUpdates.label($0)))") },
                 ].compactMap { $0 }.joined(separator: " · ")
                 if !caption.isEmpty {
                     Text(caption)
@@ -534,6 +536,12 @@ private struct GameRow: View {
             }
         }
         .padding(.vertical, 2)
+        .onAppear { if let id = game.titleID, GameDetector.kind(of: id) == .base { updates.check(id) } }
+    }
+
+    private var newerBuild: Int? {
+        updates.newerBuild(titleID: game.titleID, installed: GameDetector.installedBuild(
+            titleID: game.titleID, romFileName: game.url.deletingPathExtension().lastPathComponent))
     }
 }
 

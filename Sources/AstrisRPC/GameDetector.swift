@@ -263,6 +263,32 @@ final class GameDetector {
         return nil
     }
 
+    private static let buildRegex = try! NSRegularExpression(pattern: #"\[v(\d+)\]"#, options: .caseInsensitive)
+
+    /// Switch build number in "[v196608]" (0 = no update).
+    static func buildNumber(in fileName: String) -> Int? {
+        let range = NSRange(fileName.startIndex..., in: fileName)
+        guard let m = buildRegex.firstMatch(in: fileName, range: range),
+              let r = Range(m.range(at: 1), in: fileName) else { return nil }
+        return Int(fileName[r])
+    }
+
+    /// Build installed for a game: the update selected in Astris, else the ROM's own "[vN]".
+    static func installedBuild(titleID: String?, romFileName: String) -> Int? {
+        if let titleID {
+            for dir in astrisGamesDirectories {
+                let file = dir.appendingPathComponent("\(titleID.lowercased())/updates.json")
+                if let data = try? Data(contentsOf: file),
+                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   let selected = json["selected"] as? String, !selected.isEmpty,
+                   let build = buildNumber(in: (selected as NSString).lastPathComponent) {
+                    return build
+                }
+            }
+        }
+        return buildNumber(in: romFileName)
+    }
+
     /// Base games end in 000, updates in 800, DLC in anything else.
     static func kind(of titleID: String) -> TitleKind? {
         guard titleID.count == 16, let value = UInt64(titleID, radix: 16) else { return nil }

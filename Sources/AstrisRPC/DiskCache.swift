@@ -30,15 +30,19 @@ final class DiskStore {
     private let file: URL?
     private let lock = NSLock()
     private var entries: [String: Entry]
+    private let found: TimeInterval
+    private let missing: TimeInterval
 
-    init(file: URL?) {
+    init(file: URL?, foundLifetime: TimeInterval = DiskStore.foundLifetime, missingLifetime: TimeInterval = DiskStore.missingLifetime) {
         self.file = file
+        found = foundLifetime
+        missing = missingLifetime
         entries = file.flatMap { try? Data(contentsOf: $0) }
             .flatMap { try? JSONDecoder().decode([String: Entry].self, from: $0) } ?? [:]
     }
 
-    convenience init(name: String) {
-        self.init(file: AppPaths.caches?.appendingPathComponent("\(name).json"))
+    convenience init(name: String, foundLifetime: TimeInterval = DiskStore.foundLifetime, missingLifetime: TimeInterval = DiskStore.missingLifetime) {
+        self.init(file: AppPaths.caches?.appendingPathComponent("\(name).json"), foundLifetime: foundLifetime, missingLifetime: missingLifetime)
     }
 
     /// `hit` is false when the key is unknown or expired.
@@ -46,7 +50,7 @@ final class DiskStore {
         lock.lock()
         defer { lock.unlock() }
         guard let entry = entries[key] else { return (false, nil) }
-        let lifetime = entry.value == nil ? Self.missingLifetime : Self.foundLifetime
+        let lifetime = entry.value == nil ? missing : found
         guard now.timeIntervalSince(entry.date) < lifetime else { return (false, nil) }
         return (true, entry.value)
     }

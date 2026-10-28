@@ -822,3 +822,26 @@ final class QuickLauncherTests: XCTestCase {
         XCTAssertEqual(model.selected, 0, "typing resets the selection")
     }
 }
+
+final class GameUpdatesTests: XCTestCase {
+    func testBuildParsing() {
+        XCTAssertEqual(GameDetector.buildNumber(in: "Zelda [0100F2C0115B6800][v196608]"), 196608)
+        XCTAssertNil(GameDetector.buildNumber(in: "Zelda [v1.2.0]"))
+        XCTAssertEqual(GameUpdates.build(in: ["version": NSNumber(value: 393216)]), 393216)
+        XCTAssertEqual(GameUpdates.build(in: ["version": "131072"]), 131072)
+        XCTAssertNil(GameUpdates.build(in: ["version": "1.2.0"]))
+        L10n.isFrench = false
+        XCTAssertEqual(GameUpdates.label(196608), "update 3")
+        XCTAssertEqual(GameUpdates.label(5), "v5")
+    }
+
+    func testNewerBuildFromStore() {
+        let store = DiskStore(file: nil, foundLifetime: 86400, missingLifetime: 86400)
+        store.set("393216", for: "0100F2C0115B6000")
+        let updates = GameUpdates(store: store)
+        updates.check("0100F2C0115B6800")
+        XCTAssertEqual(updates.newerBuild(titleID: "0100F2C0115B6000", installed: 196608), 393216)
+        XCTAssertNil(updates.newerBuild(titleID: "0100F2C0115B6000", installed: 393216))
+        XCTAssertEqual(updates.newerBuild(titleID: "0100F2C0115B6000", installed: nil), 393216, "no update installed")
+    }
+}
