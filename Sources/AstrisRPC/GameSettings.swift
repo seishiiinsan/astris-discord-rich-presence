@@ -47,6 +47,7 @@ final class GameSettings: ObservableObject {
     private static let hotKeysKey = "hotKeys"
     private static let importedFavoritesKey = "importedAstrisFavorites"
     private static let streamerKey = "streamerMode"
+    private static let menuBarTimerKey = "menuBarTimer"
     private static let steamGridDBKeyKey = "steamGridDBKey"
     private static let preferSteamGridDBKey = "preferSteamGridDB"
     private static let notifyDiscordKey = "notifyDiscordLost"
@@ -167,6 +168,11 @@ final class GameSettings: ObservableObject {
         return preferSteamGridDB ? steamGridDB() ?? switchArt() : switchArt() ?? steamGridDB()
     }
 
+    /// Session time next to the menu bar icon.
+    @Published var menuBarTimer: Bool {
+        didSet { defaults.set(menuBarTimer, forKey: Self.menuBarTimerKey) }
+    }
+
     @Published var notifyDiscordLost: Bool {
         didSet { defaults.set(notifyDiscordLost, forKey: Self.notifyDiscordKey) }
     }
@@ -237,6 +243,7 @@ final class GameSettings: ObservableObject {
         importedFavorites = Set(defaults.stringArray(forKey: Self.importedFavoritesKey) ?? [])
         hotKeysEnabled = defaults.object(forKey: Self.hotKeysKey) as? Bool ?? true
         streamerMode = defaults.bool(forKey: Self.streamerKey)
+        menuBarTimer = defaults.bool(forKey: Self.menuBarTimerKey)
         steamGridDBKey = defaults.string(forKey: Self.steamGridDBKeyKey)
         preferSteamGridDB = defaults.bool(forKey: Self.preferSteamGridDBKey)
         notifyDiscordLost = defaults.object(forKey: Self.notifyDiscordKey) as? Bool ?? true

@@ -635,3 +635,18 @@ final class SteamGridDBTests: XCTestCase {
         XCTAssertEqual(settings.pickCover(switchArt: { "switch" }, steamGridDB: { "sgdb" }), "sgdb")
     }
 }
+
+final class MenuBarTimerTests: XCTestCase {
+    func testClockAndCurrentSession() {
+        XCTAssertEqual(PlayHistory.clock(30), "0:00")
+        XCTAssertEqual(PlayHistory.clock(5 * 60), "0:05")
+        XCTAssertEqual(PlayHistory.clock(84 * 60), "1:24")
+        let history = PlayHistory(file: nil)
+        XCTAssertNil(history.currentSessionStart)
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        history.update(name: "Zelda", titleID: nil, romPath: "/z.nsp", now: t0)
+        XCTAssertEqual(history.currentSessionStart, t0)
+        history.update(name: nil, titleID: nil, romPath: nil, now: t0 + 3)
+        XCTAssertNil(history.currentSessionStart)
+    }
+}

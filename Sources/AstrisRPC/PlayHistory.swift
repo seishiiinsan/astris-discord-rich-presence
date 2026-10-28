@@ -60,6 +60,17 @@ final class PlayHistory: ObservableObject {
         save()
     }
 
+    /// Start of the session being played (nil when none, or idle).
+    var currentSessionStart: Date? {
+        open ? sessions.last?.start : nil
+    }
+
+    /// "0:05", "1:24"
+    static func clock(_ seconds: TimeInterval) -> String {
+        let minutes = max(0, Int(seconds / 60))
+        return String(format: "%d:%02d", minutes / 60, minutes % 60)
+    }
+
     func save() {
         lastSave = Date()
         guard let file else { return }

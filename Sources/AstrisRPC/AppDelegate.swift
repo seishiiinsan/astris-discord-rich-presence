@@ -584,6 +584,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             iconSymbol = symbol
             button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
         }
+        let start = settings.menuBarTimer ? history.currentSessionStart : nil
+        button.title = start.map { " " + PlayHistory.clock(Date().timeIntervalSince($0)) } ?? ""
+        button.imagePosition = .imageLeading
         button.toolTip = label
         button.setAccessibilityLabel(label)
         button.appearsDisabled = !enabled || !astrisRunning
