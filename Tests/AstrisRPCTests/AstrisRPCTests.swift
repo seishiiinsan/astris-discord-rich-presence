@@ -603,3 +603,35 @@ final class StatsExtrasTests: XCTestCase {
         XCTAssertTrue(lines[1].hasSuffix(",1"))
     }
 }
+
+final class SteamGridDBTests: XCTestCase {
+    func testURLsAndParsing() {
+        XCTAssertEqual(SteamGridDB.searchURL("Zelda: TOTK/2")?.absoluteString,
+                       "https://www.steamgriddb.com/api/v2/search/autocomplete/Zelda:%20TOTK%2F2")
+        XCTAssertEqual(SteamGridDB.gridsURL(gameID: 42)?.absoluteString,
+                       "https://www.steamgriddb.com/api/v2/grids/game/42?dimensions=512x512,1024x1024&types=static")
+        let body = Data(#"{"success": true, "data": [{"id": 42, "name": "Zelda"}]}"#.utf8)
+        XCTAssertEqual((SteamGridDB.data(body)?.first?["id"] as? NSNumber)?.intValue, 42)
+        XCTAssertNil(SteamGridDB.data(Data(#"{"success": false}"#.utf8)))
+    }
+
+    func testNoKeyNoLookup() {
+        let sgdb = SteamGridDB(store: nil)
+        XCTAssertNil(sgdb.cover(forName: "Zelda", apiKey: nil))
+        XCTAssertNil(sgdb.cover(forName: "Zelda", apiKey: ""))
+    }
+
+    func testStoredCoverAndOrder() throws {
+        let store = DiskStore(file: nil)
+        store.set("https://sgdb/zelda.png", for: "zelda")
+        XCTAssertEqual(SteamGridDB(store: store).cover(forName: "Zelda", apiKey: "k"), "https://sgdb/zelda.png")
+
+        let settings = GameSettings(defaults: try XCTUnwrap(UserDefaults(suiteName: "AstrisRPCTests-\(UUID().uuidString)")))
+        XCTAssertEqual(settings.pickCover(switchArt: { "switch" }, steamGridDB: { "sgdb" }), "switch", "no key: Switch art only")
+        settings.steamGridDBKey = "k"
+        XCTAssertEqual(settings.pickCover(switchArt: { nil }, steamGridDB: { "sgdb" }), "sgdb", "fallback")
+        XCTAssertEqual(settings.pickCover(switchArt: { "switch" }, steamGridDB: { "sgdb" }), "switch")
+        settings.preferSteamGridDB = true
+        XCTAssertEqual(settings.pickCover(switchArt: { "switch" }, steamGridDB: { "sgdb" }), "sgdb")
+    }
+}

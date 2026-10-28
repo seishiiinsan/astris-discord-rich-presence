@@ -286,7 +286,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 }
                 buttons.append(settings.customButton ?? ("Astris", Self.astrisURL))
                 let cover = settings.hidesCover ? nil
-                    : detector.romPath.flatMap(settings.discordCover(for:)) ?? game.titleID.flatMap(covers.cover(for:))
+                    : detector.romPath.flatMap(settings.discordCover(for:)) ?? settings.pickCover(
+                        switchArt: { game.titleID.flatMap(covers.cover(for:)) },
+                        steamGridDB: { SteamGridDB.shared.cover(forName: game.name, apiKey: settings.steamGridDBKey) })
                 let templates = settings.templates(for: detector.romPath)
                 presence = Presence(
                     details: PresenceTemplate.render(Self.template(templates.details, PresenceTemplate.defaultDetails), values: values) ?? name,

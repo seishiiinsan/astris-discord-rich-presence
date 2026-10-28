@@ -47,6 +47,8 @@ final class GameSettings: ObservableObject {
     private static let hotKeysKey = "hotKeys"
     private static let importedFavoritesKey = "importedAstrisFavorites"
     private static let streamerKey = "streamerMode"
+    private static let steamGridDBKeyKey = "steamGridDBKey"
+    private static let preferSteamGridDBKey = "preferSteamGridDB"
     private static let notifyDiscordKey = "notifyDiscordLost"
     private static let notifyUpdatesKey = "notifyUpdates"
     private static let notifySummaryKey = "notifyWeeklySummary"
@@ -149,6 +151,22 @@ final class GameSettings: ObservableObject {
         didSet { defaults.set(language.rawValue, forKey: L10n.languageKey) }
     }
 
+    /// The user's own SteamGridDB API key (empty: source off).
+    @Published var steamGridDBKey: String? {
+        didSet { Self.store(steamGridDBKey, Self.steamGridDBKeyKey, in: defaults) }
+    }
+
+    /// Try SteamGridDB before the Switch art sources.
+    @Published var preferSteamGridDB: Bool {
+        didSet { defaults.set(preferSteamGridDB, forKey: Self.preferSteamGridDBKey) }
+    }
+
+    /// Cover from the resolved Switch art and SteamGridDB, in the chosen order.
+    func pickCover(switchArt: () -> String?, steamGridDB: () -> String?) -> String? {
+        guard let key = steamGridDBKey, !key.trimmingCharacters(in: .whitespaces).isEmpty else { return switchArt() }
+        return preferSteamGridDB ? steamGridDB() ?? switchArt() : switchArt() ?? steamGridDB()
+    }
+
     @Published var notifyDiscordLost: Bool {
         didSet { defaults.set(notifyDiscordLost, forKey: Self.notifyDiscordKey) }
     }
@@ -219,6 +237,8 @@ final class GameSettings: ObservableObject {
         importedFavorites = Set(defaults.stringArray(forKey: Self.importedFavoritesKey) ?? [])
         hotKeysEnabled = defaults.object(forKey: Self.hotKeysKey) as? Bool ?? true
         streamerMode = defaults.bool(forKey: Self.streamerKey)
+        steamGridDBKey = defaults.string(forKey: Self.steamGridDBKeyKey)
+        preferSteamGridDB = defaults.bool(forKey: Self.preferSteamGridDBKey)
         notifyDiscordLost = defaults.object(forKey: Self.notifyDiscordKey) as? Bool ?? true
         notifyUpdates = defaults.object(forKey: Self.notifyUpdatesKey) as? Bool ?? true
         notifyWeeklySummary = defaults.object(forKey: Self.notifySummaryKey) as? Bool ?? true

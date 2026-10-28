@@ -253,6 +253,22 @@ struct DiscordSettingsView: View {
             }
 
             Section {
+                SecureField(L10n.tr("Clé API", "API key"), text: Binding(
+                    get: { settings.steamGridDBKey ?? "" },
+                    set: { settings.steamGridDBKey = $0.isEmpty ? nil : $0 }))
+                Toggle(L10n.tr("Préférer SteamGridDB", "Prefer SteamGridDB"), isOn: $settings.preferSteamGridDB)
+                    .disabled(settings.steamGridDBKey == nil)
+            } header: {
+                Text("SteamGridDB")
+            } footer: {
+                Text(L10n.tr(
+                    "Jaquettes en plus, cherchées par nom : homebrew et jeux sans TitleID compris. Clé gratuite sur steamgriddb.com → Préférences → API.",
+                    "Extra covers, found by name: homebrew and games without a TitleID included. Free key at steamgriddb.com → Preferences → API."))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Section {
                 Toggle(L10n.tr("Bouton « Voir sur l'eShop »", "“View on eShop” button"), isOn: $settings.showEShopButton)
                 TextField(L10n.tr("Libellé", "Label"), text: optional(\.customButtonLabel), prompt: Text("Astris"))
                 TextField("URL", text: optional(\.customButtonURL), prompt: Text("https://…"))
@@ -422,7 +438,7 @@ private struct GameRow: View {
     var body: some View {
         let hidden = settings.isHidden(game.url.path)
         HStack(spacing: 10) {
-            CoverView(titleID: game.titleID, covers: covers, size: 32, customCover: settings.prefs(for: game.url.path).customCover)
+            CoverView(titleID: game.titleID, covers: covers, size: 32, customCover: settings.prefs(for: game.url.path).customCover, name: game.name, settings: settings)
                 .opacity(hidden ? 0.45 : 1)
             VStack(alignment: .leading, spacing: 2) {
                 Text(settings.displayName(for: game.url.path, detected: game.name))
@@ -473,7 +489,7 @@ private struct GameDetailView: View {
     var body: some View {
         VStack(spacing: 0) {
             VStack(spacing: 10) {
-                CoverView(titleID: game.titleID, covers: covers, size: 112, customCover: settings.prefs(for: path).customCover)
+                CoverView(titleID: game.titleID, covers: covers, size: 112, customCover: settings.prefs(for: path).customCover, name: game.name, settings: settings)
                     .shadow(color: .black.opacity(0.2), radius: 8, y: 4)
                     .dropDestination(for: URL.self) { urls, _ in
                         guard let url = urls.first else { return false }
@@ -714,7 +730,7 @@ struct StatsView: View {
     private func list(_ rows: [PlayHistory.GameTotal]) -> some View {
         List(rows) { row in
             HStack(spacing: 10) {
-                CoverView(titleID: row.titleID, covers: covers, size: 32, customCover: settings.prefs(for: row.rom).customCover)
+                CoverView(titleID: row.titleID, covers: covers, size: 32, customCover: settings.prefs(for: row.rom).customCover, name: row.name, settings: settings)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(settings.displayName(for: row.rom, detected: row.name)).lineLimit(1)
                     Text(row.lastPlayed.formatted(date: .abbreviated, time: .omitted))
@@ -783,6 +799,9 @@ private struct CoverView: View {
     let size: CGFloat
     /// Overrides the resolved cover (https or file URL).
     var customCover: String? = nil
+    /// For the SteamGridDB lookup.
+    var name: String? = nil
+    var settings: GameSettings = .shared
     @State private var image: NSImage?
 
     var body: some View {
@@ -809,9 +828,12 @@ private struct CoverView: View {
             image = await Self.load(customCover)
             return
         }
-        guard let titleID else { return }
+        guard titleID != nil || name != nil else { return }
         for _ in 0..<20 {
-            if let link = covers.cover(for: titleID) {
+            let link = settings.pickCover(
+                switchArt: { titleID.flatMap(covers.cover(for:)) },
+                steamGridDB: { name.flatMap { SteamGridDB.shared.cover(forName: $0, apiKey: settings.steamGridDBKey) } })
+            if let link {
                 image = await Self.load(link)
                 return
             }
