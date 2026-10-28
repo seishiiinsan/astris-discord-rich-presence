@@ -220,8 +220,8 @@ struct DiscordSettingsView: View {
                 Text(L10n.tr("Texte", "Text"))
             } footer: {
                 Text(L10n.tr(
-                    "Variables : {game} nom du jeu, {played} temps déjà joué, {version} version du jeu. Une partie « · » dont la variable est inconnue est retirée. Vide : texte par défaut.",
-                    "Variables: {game} game name, {played} time already played, {version} game version. A “ · ” part whose variable is unknown is left out. Empty: default text."))
+                    "Variables : {game} nom du jeu, {played} temps déjà joué, {version} version, {mode} mode TV ou portable, {multi} « Multijoueur local » si actif dans Astris. Une partie « · » dont la variable est inconnue est retirée. Vide : texte par défaut.",
+                    "Variables: {game} game name, {played} time already played, {version} version, {mode} TV or handheld mode, {multi} “Local multiplayer” when on in Astris. A “ · ” part whose variable is unknown is left out. Empty: default text."))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }

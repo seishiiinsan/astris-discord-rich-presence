@@ -449,3 +449,12 @@ final class AstrisConfigTests: XCTestCase {
         XCTAssertNil(AstrisConfig.parse(Data("nope".utf8)))
     }
 }
+
+final class ModeTemplateTests: XCTestCase {
+    func testMultiOnlyWhenOn() {
+        L10n.isFrench = true
+        let template = PresenceTemplate.defaultState
+        XCTAssertEqual(PresenceTemplate.render(template, values: ["played": "3 h", "multi": nil]), "Sur Astris · 3 h jouées")
+        XCTAssertEqual(PresenceTemplate.render(template, values: ["played": nil, "multi": "Multijoueur local"]), "Sur Astris · Multijoueur local")
+    }
+}

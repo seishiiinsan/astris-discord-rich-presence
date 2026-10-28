@@ -14,6 +14,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let recents = RecentGames()
     private let idle = IdleMonitor()
     private let history = PlayHistory()
+    private var astrisConfig: AstrisConfig?
+    private var astrisConfigDate = Date.distantPast
     private var isIdle = false
     private var thumbnails: [String: NSImage] = [:]
     private var loadingThumbnails: Set<String> = []
@@ -102,6 +104,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    /// Astris' Config.json, re-read at most every 30 s.
+    private func currentAstrisConfig() -> AstrisConfig? {
+        if Date().timeIntervalSince(astrisConfigDate) > 30 {
+            astrisConfig = AstrisConfig.load()
+            astrisConfigDate = Date()
+        }
+        return astrisConfig
+    }
+
     /// No folder chosen yet: use the one set in Astris.
     private func adoptAstrisGamesFolder() {
         guard settings.gamesFolder == nil, let folder = AstrisConfig.load()?.existingGameDirectories.first else { return }
@@ -172,12 +183,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     buttons: [("Astris", Self.astrisURL)])
             } else if let game = detector.game {
                 let name = detector.romPath.map { settings.displayName(for: $0, detected: game.name) } ?? game.name
+                let config = currentAstrisConfig()
+                let mode: String? = config?.docked.map { $0 ? L10n.tr("Mode TV", "TV mode") : L10n.tr("Mode portable", "Handheld") }
                 // "1.2.0" -> "v1.2.0"; "update 3" stays as is.
                 let version = game.version.map { $0.first?.isNumber == true ? "v\($0)" : $0 }
                 let values: [String: String?] = [
                     "game": name,
                     "played": game.playedTime.flatMap(Self.formatPlayed),
                     "version": version,
+                    "mode": mode,
+                    "multi": config?.multiplayer == true ? L10n.tr("Multijoueur local", "Local multiplayer") : nil,
                 ]
                 var buttons: [(label: String, url: String)] = []
                 if settings.showEShopButton {
@@ -193,7 +208,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     imageText: name,
                     // Astris badge on the cover, with the game version when known.
                     smallImage: cover == nil ? nil : Self.astrisLogo,
-                    smallText: version.map { "Astris · \($0)" } ?? "Astris",
+                    smallText: (["Astris", version, mode] as [String?]).compactMap { $0 }.joined(separator: " · "),
                     buttons: buttons)
             } else {
                 presence = Presence(
