@@ -8,7 +8,7 @@ App macOS de barre de menus qui ajoute le Discord Rich Presence à [Astris](http
 **En pause** : sans clavier, souris ni manette pendant 15 min (réglable), « En pause · Sur Astris », sans chrono.
 **Dans le menu d'Astris** : « Dans le menu » avec le logo Astris.
 
-📖 **[Toutes les fonctionnalités](docs/FONCTIONNALITES.md)**
+📖 **[Toutes les fonctionnalités](docs/FONCTIONNALITES.md)** — aussi dans l'app : menu → Fonctionnalités… (⌘?)
 
 ## Installation
 
@@ -127,6 +127,13 @@ Sources/AstrisRPC/
   URLCommand.swift     liens astrisrpc://
   Notifier.swift       notifications macOS
   SteamGridDB.swift    jaquettes SteamGridDB
+  AstrisFiles.swift    captures et sauvegardes des saves
+  SettingsTransfer.swift export / import des réglages
+  PlayReminders.swift  rappel de pause, paliers, records
+  Controllers.swift    manettes et batterie
+  QuickLauncher.swift  lanceur rapide ⌃⌥⌘G
+  GameUpdates.swift    mises à jour de jeux disponibles
+  Help.swift           aide intégrée (Fonctionnalités…)
   RecentGames.swift    jeux récents (UserDefaults)
   GameSettings.swift   préférences (dossier, liste noire, noms, jaquettes, favoris, textes)
   GameLibrary.swift    jeux du dossier

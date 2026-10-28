@@ -1,6 +1,6 @@
 # Fonctionnalités d'Astris RPC
 
-Tout ce que fait l'app, par usage. Installation, build et release : voir le [README](../README.md).
+Tout ce que fait l'app, par usage. Aussi dans l'app : menu → **Fonctionnalités…** (⌘?), avec recherche. Installation, build et release : voir le [README](../README.md).
 
 - [Sur Discord](#sur-discord)
 - [Menu](#menu)
@@ -9,6 +9,7 @@ Tout ce que fait l'app, par usage. Installation, build et release : voir le [REA
 - [Notifications](#notifications)
 - [Statistiques](#statistiques)
 - [Jaquettes](#jaquettes)
+- [Outils](#outils)
 - [Lien avec Astris](#lien-avec-astris)
 - [Confidentialité](#confidentialité)
 - [Dépannage](#dépannage)
@@ -34,6 +35,7 @@ Tout ce que fait l'app, par usage. Installation, build et release : voir le [REA
 | `{version}` | version du jeu (« v1.2.0 », « màj 3 ») |
 | `{mode}` | « Mode TV » ou « Mode portable » |
 | `{multi}` | « Multijoueur local » si actif dans Astris |
+| `{status}` | statut du jeu (À faire, En cours, Terminé, 100 %) |
 
 Les parties séparées par « · » dont la variable n'a pas de valeur sont retirées : `Sur Astris · {played} jouées` devient `Sur Astris` pour un jeu jamais lancé. Champ vide = texte par défaut. Texte d'un jeu > texte global > défaut.
 
@@ -43,16 +45,20 @@ Les parties séparées par « · » dont la variable n'a pas de valeur sont reti
 
 ## Menu
 
-Icône de manette dans la barre des menus : pleine en jeu, vide sinon, grisée si Astris est fermé ou l'affichage coupé, ⚠︎ si Discord est fermé pendant qu'Astris tourne.
+Icône de manette dans la barre des menus : pleine en jeu, vide sinon, grisée si Astris est fermé ou l'affichage coupé, ⚠︎ si Discord est fermé pendant qu'Astris tourne. En option, le chrono de session à côté (« 1:24 »).
 
 - **État** : jeu en cours (+ temps déjà joué ou « En pause »), état de Discord ; « Discord fermé — Ouvrir Discord » est cliquable.
+- **Lancer un jeu…** (⌃⌥⌘G) : lanceur rapide.
 - **Jeux récents** : les 5 derniers jeux, avec jaquette. Un clic les ouvre dans Astris.
 - **Favoris** : les jeux étoilés.
+- **Dernière capture** : copier ou afficher la dernière capture faite dans Astris.
+- **Manettes** : manettes connectées et batterie (« Pro Controller · 80 % »).
 - **Afficher sur Discord** (⌃⌥⌘D).
 - **Masquer ce jeu sur Discord** (⌃⌥⌘H), en jeu seulement.
 - **Mode streamer**.
 - **Réglages…** (⌘,).
 - **Mises à jour** : « Mettre à jour vers vX » quand une version sort, « Rechercher les mises à jour… », version installée.
+- **Fonctionnalités…** (⌘?) : cette page, dans l'app.
 - **Copier le diagnostic**.
 - **Quitter Astris RPC**.
 
@@ -62,11 +68,12 @@ Icône de manette dans la barre des menus : pleine en jeu, vide sinon, grisée s
 
 - Afficher mon jeu sur Discord.
 - Ouvrir à la connexion.
-- Raccourcis clavier globaux (⌃⌥⌘D, ⌃⌥⌘H).
+- Chrono de session dans la barre des menus.
+- Raccourcis clavier globaux (⌃⌥⌘D, ⌃⌥⌘H, ⌃⌥⌘G).
 - Afficher « En pause » après : jamais, 5, 10, 15 (défaut) ou 30 min.
 - Langue : comme le Mac, français ou anglais (appliquée au relancement, bouton « Relancer »).
 - Dossier des jeux : repris d'Astris au premier lancement, modifiable.
-- Notifications : Discord déconnecté, mise à jour, bilan de la semaine.
+- Notifications : Discord déconnecté, mise à jour, bilan de la semaine, paliers et records, batterie de manette, rappel de pause.
 - Dépannage : journal sur disque, vider le cache des jaquettes.
 
 ### Discord
@@ -78,11 +85,12 @@ Icône de manette dans la barre des menus : pleine en jeu, vide sinon, grisée s
 
 ### Jeux
 
-Liste des jeux du dossier (`.xci .xcz .nsp .nsz .nro`, jusqu'à 3 niveaux de sous-dossiers), avec jaquette, recherche, ★ et œil barré pour les jeux masqués.
+Liste des jeux du dossier (`.xci .xcz .nsp .nsz .nro`, jusqu'à 3 niveaux de sous-dossiers), avec jaquette, recherche, ★ et œil barré pour les jeux masqués. Filtre (tous, favoris, par statut), tri par nom ou par taille, taille totale du dossier, doublons signalés (même jeu de base ou même nom), « Mise à jour dispo » quand une version plus récente que celle installée existe (api.nlib.cc, revérifié chaque jour).
 
 - **Double-clic** ou **Lancer dans Astris** : ouvre le jeu.
 - **Clic droit** : lancer, favori, afficher dans le Finder.
 - Par jeu :
+  - suivi : statut (À faire, En cours, Terminé, 100 %), note sur 5, mémo ;
   - afficher sur Discord ou masquer (liste noire) ;
   - cacher le temps joué ;
   - texte propre au jeu (lignes 1 et 2) ;
@@ -105,6 +113,7 @@ Voir [Statistiques](#statistiques).
 | --- | --- |
 | ⌃⌥⌘D | afficher / couper l'affichage sur Discord |
 | ⌃⌥⌘H | masquer / réafficher le jeu en cours |
+| ⌃⌥⌘G | lanceur rapide : tape un nom, ↑↓, ↩︎ pour lancer, esc pour fermer |
 
 **Liens `astrisrpc://`**, pour Raccourcis, Raycast, Alfred ou le Terminal (`open "astrisrpc://toggle"`) :
 
@@ -123,6 +132,10 @@ Activables une par une dans Réglages → Général (macOS demande l'autorisatio
 - **Discord déconnecté** pendant que ton jeu était affiché. Nouvel essai automatique : 3 s, 6 s… jusqu'à 60 s, immédiat quand Discord se relance.
 - **Mise à jour disponible**, une fois par version.
 - **Bilan de la semaine**, le dimanche à partir de 19 h : « 8 h 20 cette semaine sur 3 jeux, surtout Zelda (5 h 10). »
+- **Paliers** : 10, 25, 50, 100, 200 et 500 h sur un jeu (une fois chacun), et **record** quand la session dépasse la plus longue jamais comptée (30 min au moins).
+- **Rappel de pause** : « Tu joues depuis 2 h », toutes les 1 h, 1 h 30, 2 h ou 3 h (désactivé par défaut).
+- **Batterie de manette** sous 20 %, une fois par décharge.
+- **Captures d'écran** faites dans Astris (Réglages → Outils), avec copie automatique dans le presse-papiers en option.
 
 ## Statistiques
 
@@ -145,6 +158,14 @@ Ordre de recherche :
 4. logo Astris.
 
 Les adresses trouvées sont gardées 30 jours, les absences 3 jours. Une absence due à une coupure réseau n'est pas retenue. Les images ne sont téléchargées qu'une fois.
+
+## Outils
+
+Réglages → Outils.
+
+- **Captures d'écran** : notification, copie automatique, ouvrir le dossier des captures d'Astris.
+- **Sauvegardes des jeux** : zip des saves d'Astris (`bis/user/save`) dans `~/Documents/Astris RPC/Sauvegardes`, à la demande, à la fermeture d'un jeu ou chaque semaine (défaut). Les 20 dernières sont gardées. **Restaurer** (Astris fermé) remet une sauvegarde et garde les saves actuelles à côté (« save before restore … »).
+- **Export / import des réglages** : un fichier `.astrisrpc` avec tous les réglages, les réglages par jeu, les favoris et l'historique de jeu. L'import remplace tout et relance l'app.
 
 ## Lien avec Astris
 
@@ -180,3 +201,4 @@ Rien à configurer, et aucune permission macOS :
 | `~/Library/Application Support/AstrisRPC/Covers/` | jaquettes perso importées |
 | `~/Library/Caches/AstrisRPC/` | adresses de jaquettes, liens eShop, SteamGridDB, images |
 | `~/Library/Logs/AstrisRPC.log` | journal (si activé) |
+| `~/Documents/Astris RPC/Sauvegardes/` | sauvegardes des saves |
