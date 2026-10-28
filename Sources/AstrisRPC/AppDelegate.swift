@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let eShop = EShopResolver()
     private let recents = RecentGames()
     private let idle = IdleMonitor()
+    private let history = PlayHistory()
     private var isIdle = false
     private var thumbnails: [String: NSImage] = [:]
     private var loadingThumbnails: Set<String> = []
@@ -80,6 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        history.save()
         discordQueue.sync {
             if discord.isConnected { _ = discord.setActivity(nil) }
             discord.disconnect()
@@ -176,6 +178,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let wasIdle = isIdle
         isIdle = detector.game != nil && IdleMonitor.isIdle(idleTime: idle.idleTime, afterMinutes: settings.idleMinutes)
         if isIdle != wasIdle { Log.shared.add(isIdle ? "Idle" : "Back from idle") }
+        let played = isIdle ? nil : detector.game
+        history.update(name: played?.name, titleID: played?.titleID, romPath: played == nil ? nil : detector.romPath)
         if isIdle, presence != nil {
             // Paused: no running clock.
             presence?.state = L10n.tr("En pause · Sur Astris", "Idle · On Astris")
@@ -446,7 +450,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func openSettings() {
         if settingsWindow == nil {
-            settingsWindow = SettingsWindowController(settings: settings, covers: covers, recents: recents)
+            settingsWindow = SettingsWindowController(settings: settings, covers: covers, recents: recents, history: history)
         }
         settingsWindow?.show()
     }

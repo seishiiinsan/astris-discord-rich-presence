@@ -4,21 +4,24 @@ import SwiftUI
 
 /// Native macOS Settings window: toolbar tabs (General, Games), opened with ⌘,.
 final class SettingsWindowController: NSWindowController {
-    convenience init(settings: GameSettings, covers: CoverResolver, recents: RecentGames) {
+    convenience init(settings: GameSettings, covers: CoverResolver, recents: RecentGames, history: PlayHistory) {
         let tabs = NSTabViewController()
         tabs.tabStyle = .toolbar
 
         let general = NSHostingController(rootView: GeneralSettingsView(settings: settings, recents: recents))
         let discord = NSHostingController(rootView: DiscordSettingsView(settings: settings))
         let games = NSHostingController(rootView: GamesSettingsView(settings: settings, covers: covers, recents: recents))
+        let stats = NSHostingController(rootView: StatsView(history: history, settings: settings, covers: covers))
         general.sizingOptions = .preferredContentSize
         discord.sizingOptions = .preferredContentSize
         games.sizingOptions = .preferredContentSize
+        stats.sizingOptions = .preferredContentSize
 
         // The window title follows the selected tab.
         general.title = L10n.tr("Général", "General")
         discord.title = "Discord"
         games.title = L10n.tr("Jeux", "Games")
+        stats.title = L10n.tr("Statistiques", "Stats")
 
         let generalItem = NSTabViewItem(viewController: general)
         generalItem.label = L10n.tr("Général", "General")
@@ -32,6 +35,10 @@ final class SettingsWindowController: NSWindowController {
         tabs.addTabViewItem(generalItem)
         tabs.addTabViewItem(discordItem)
         tabs.addTabViewItem(gamesItem)
+        let statsItem = NSTabViewItem(viewController: stats)
+        statsItem.label = L10n.tr("Statistiques", "Stats")
+        statsItem.image = NSImage(systemSymbolName: "chart.bar", accessibilityDescription: nil)
+        tabs.addTabViewItem(statsItem)
 
         let window = NSWindow(contentViewController: tabs)
         window.styleMask = [.titled, .closable]
@@ -428,6 +435,89 @@ private struct GameDetailView: View {
             .padding([.horizontal, .bottom], 20)
         }
         .onAppear { name = settings.prefs(for: path).customName ?? "" }
+    }
+}
+
+// MARK: - Stats
+
+struct StatsView: View {
+    @ObservedObject var history: PlayHistory
+    @ObservedObject var settings: GameSettings
+    let covers: CoverResolver
+    @State private var confirmClear = false
+
+    var body: some View {
+        let week = PlayHistory.startOfWeek()
+        let rows = history.totals(recentSince: week)
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                StatTile(value: PlayHistory.format(history.total(since: week)), label: L10n.tr("Cette semaine", "This week"))
+                Divider().frame(height: 40)
+                StatTile(value: PlayHistory.format(history.total(since: .distantPast)), label: L10n.tr("Au total", "In total"))
+                Divider().frame(height: 40)
+                StatTile(value: "\(rows.count)", label: L10n.tr("Jeux lancés", "Games played"))
+            }
+            .padding(.vertical, 16)
+            Divider()
+            if rows.isEmpty {
+                EmptyStateView(
+                    symbol: "chart.bar",
+                    title: L10n.tr("Aucune session pour l'instant", "No sessions yet"),
+                    message: L10n.tr(
+                        "Le temps passé en jeu sur Astris est compté ici à partir de maintenant, sans les pauses.",
+                        "Time in game on Astris is counted here from now on, without idle time.")) { EmptyView() }
+            } else {
+                List(rows) { row in
+                    HStack(spacing: 10) {
+                        CoverView(titleID: row.titleID, covers: covers, size: 32)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(settings.displayName(for: row.rom, detected: row.name)).lineLimit(1)
+                            Text(row.lastPlayed.formatted(date: .abbreviated, time: .omitted))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text(PlayHistory.format(row.total)).monospacedDigit()
+                            if row.recent > 0 {
+                                Text(L10n.tr("\(PlayHistory.format(row.recent)) cette semaine", "\(PlayHistory.format(row.recent)) this week"))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .padding(.vertical, 2)
+                }
+                .listStyle(.inset)
+            }
+            Divider()
+            HStack {
+                Text(L10n.tr("Compté par Astris RPC, hors pauses.", "Counted by Astris RPC, idle time excluded."))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button(L10n.tr("Effacer l'historique…", "Clear History…")) { confirmClear = true }
+                    .disabled(rows.isEmpty)
+            }
+            .padding(10)
+        }
+        .frame(width: 700, height: 460)
+        .confirmationDialog(L10n.tr("Effacer tout l'historique de jeu ?", "Clear all play history?"), isPresented: $confirmClear) {
+            Button(L10n.tr("Effacer", "Clear"), role: .destructive) { history.clear() }
+        }
+    }
+}
+
+private struct StatTile: View {
+    let value: String
+    let label: String
+
+    var body: some View {
+        VStack(spacing: 2) {
+            Text(value).font(.title2.weight(.semibold)).monospacedDigit()
+            Text(label).font(.caption).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 

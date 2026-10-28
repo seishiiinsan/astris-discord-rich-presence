@@ -293,3 +293,47 @@ final class PresenceTemplateTests: XCTestCase {
         XCTAssertEqual(settings.customButton?.url, "https://twitch.tv/moi")
     }
 }
+
+final class PlayHistoryTests: XCTestCase {
+    func testSessionsSplitOnGapsAndGameChanges() {
+        let history = PlayHistory(file: nil)
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        for i in 0...20 { history.update(name: "Mario", titleID: "0100A", romPath: "/g/Mario.xci", now: t0 + Double(i * 3)) }
+        XCTAssertEqual(history.sessions.count, 1)
+        XCTAssertEqual(history.sessions[0].duration, 60)
+
+        history.update(name: "Mario", titleID: "0100A", romPath: "/g/Mario.xci", now: t0 + 600)
+        XCTAssertEqual(history.sessions.count, 2, "long gap: new session")
+        history.update(name: "Zelda", titleID: nil, romPath: "/g/Zelda.nsp", now: t0 + 603)
+        XCTAssertEqual(history.sessions.count, 3)
+        history.update(name: nil, titleID: nil, romPath: nil, now: t0 + 606)
+        history.update(name: "Zelda", titleID: nil, romPath: "/g/Zelda.nsp", now: t0 + 609)
+        XCTAssertEqual(history.sessions.count, 4, "idle or stop closes the session")
+    }
+
+    func testTotalsAndPersistence() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let history = PlayHistory(file: file)
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        history.update(name: "Mario", titleID: "0100A", romPath: "/g/Mario.xci", now: t0)
+        history.update(name: "Mario", titleID: "0100A", romPath: "/g/Mario.xci", now: t0 + 50)
+        history.update(name: "Zelda", titleID: nil, romPath: "/g/Zelda.nsp", now: t0 + 100)
+        history.update(name: "Zelda", titleID: nil, romPath: "/g/Zelda.nsp", now: t0 + 130)
+        history.save()
+
+        let reloaded = PlayHistory(file: file)
+        XCTAssertEqual(reloaded.sessions.count, 2)
+        XCTAssertEqual(reloaded.total(since: .distantPast), 80)
+        XCTAssertEqual(reloaded.total(since: t0 + 25), 55, "sessions are cut at the date")
+        let rows = reloaded.totals(recentSince: t0 + 110)
+        XCTAssertEqual(rows.map(\.name), ["Mario", "Zelda"])
+        XCTAssertEqual(rows.map(\.recent), [0, 20])
+    }
+
+    func testFormat() {
+        XCTAssertEqual(PlayHistory.format(30), "0 min")
+        XCTAssertEqual(PlayHistory.format(45 * 60), "45 min")
+        XCTAssertEqual(PlayHistory.format(3 * 3600 + 5 * 60), "3 h 05")
+    }
+}
