@@ -127,7 +127,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Looks in recents, favorites, then the games folder.
     private func launch(named name: String) {
         var games = recents.entries.map { (path: $0.romPath, name: settings.displayName(for: $0.romPath, detected: $0.name)) }
-        games += settings.favorites.map { path in
+        games += settings.favorites.map { path -> (path: String, name: String) in
             let file = ((path as NSString).lastPathComponent as NSString).deletingPathExtension
             return (path: path, name: settings.displayName(for: path, detected: GameDetector.cleanName(file)))
         }
