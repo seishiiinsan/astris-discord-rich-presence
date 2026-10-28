@@ -109,6 +109,11 @@ final class GameSettings: ObservableObject {
         didSet { defaults.set(hotKeysEnabled, forKey: Self.hotKeysKey) }
     }
 
+    /// Applied at next launch: menus are built once.
+    @Published var language: L10n.Language {
+        didSet { defaults.set(language.rawValue, forKey: L10n.languageKey) }
+    }
+
     @Published var gamesFolder: URL? {
         didSet { defaults.set(gamesFolder?.path, forKey: Self.folderKey) }
     }
@@ -137,6 +142,7 @@ final class GameSettings: ObservableObject {
         customButtonURL = defaults.string(forKey: Self.buttonURLKey)
         favorites = defaults.stringArray(forKey: Self.favoritesKey) ?? []
         hotKeysEnabled = defaults.object(forKey: Self.hotKeysKey) as? Bool ?? true
+        language = L10n.Language(rawValue: defaults.string(forKey: L10n.languageKey) ?? "") ?? .system
         prefs = defaults.data(forKey: Self.prefsKey)
             .flatMap { try? JSONDecoder().decode([String: GamePrefs].self, from: $0) } ?? [:]
         knownTitleIDs = defaults.dictionary(forKey: Self.titleIDsKey) as? [String: String] ?? [:]

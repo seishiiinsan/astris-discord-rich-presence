@@ -57,6 +57,19 @@ final class SettingsWindowController: NSWindowController {
     }
 }
 
+// MARK: - Relaunch
+
+enum Relauncher {
+    /// Starts a fresh copy once this one has quit.
+    static func relaunch() {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/bin/sh")
+        task.arguments = ["-c", "while kill -0 \(getpid()) 2>/dev/null; do sleep 0.2; done; open \"\(Bundle.main.bundlePath)\""]
+        try? task.run()
+        NSApp.terminate(nil)
+    }
+}
+
 // MARK: - Folder picking
 
 enum FolderPicker {
@@ -102,6 +115,19 @@ struct GeneralSettingsView: View {
                 Picker(L10n.tr("Afficher « En pause » après", "Show “Idle” after"), selection: $settings.idleMinutes) {
                     ForEach(GameSettings.idleChoices, id: \.self) { minutes in
                         Text(minutes == 0 ? L10n.tr("Jamais", "Never") : "\(minutes) min").tag(minutes)
+                    }
+                }
+                Picker(L10n.tr("Langue", "Language"), selection: $settings.language) {
+                    Text(L10n.tr("Comme le Mac", "Same as the Mac")).tag(L10n.Language.system)
+                    Text("Français").tag(L10n.Language.french)
+                    Text("English").tag(L10n.Language.english)
+                }
+                if L10n.resolve(settings.language, preferred: Locale.preferredLanguages) != L10n.isFrench {
+                    HStack {
+                        Text(L10n.tr("Appliquée au prochain lancement.", "Applies at next launch."))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button(L10n.tr("Relancer", "Relaunch"), action: Relauncher.relaunch)
                     }
                 }
             } footer: {

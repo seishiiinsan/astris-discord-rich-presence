@@ -412,3 +412,20 @@ final class HotKeysTests: XCTestCase {
         XCTAssertNotEqual(HotKeys.Action.toggleDiscord.keyCode, HotKeys.Action.toggleHideGame.keyCode)
     }
 }
+
+final class LanguageTests: XCTestCase {
+    func testResolve() {
+        XCTAssertTrue(L10n.resolve(.system, preferred: ["fr-FR", "en"]))
+        XCTAssertFalse(L10n.resolve(.system, preferred: ["en-US"]))
+        XCTAssertFalse(L10n.resolve(.system, preferred: []))
+        XCTAssertTrue(L10n.resolve(.french, preferred: ["en-US"]))
+        XCTAssertFalse(L10n.resolve(.english, preferred: ["fr-FR"]))
+    }
+
+    func testLanguageSettingPersists() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "AstrisRPCTests-\(UUID().uuidString)"))
+        XCTAssertEqual(GameSettings(defaults: defaults).language, .system)
+        GameSettings(defaults: defaults).language = .english
+        XCTAssertEqual(GameSettings(defaults: defaults).language, .english)
+    }
+}
