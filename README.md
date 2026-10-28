@@ -4,7 +4,7 @@
 
 App macOS de barre de menus qui ajoute le Discord Rich Presence à [Astris](https://github.com/V380-Ori/Astris.Binaries), l'émulateur Switch basé sur Ryujinx pour Mac Apple silicon.
 
-**En jeu** : nom du jeu, jaquette (badge Astris + version), « Sur Astris · 12 h jouées », chrono de session, boutons « Voir sur l'eShop » et « Astris ». Textes et boutons personnalisables.
+**En jeu** : nom du jeu, jaquette (badge Astris + version + mode TV/portable), « Sur Astris · 12 h jouées » (+ « Multijoueur local » si actif dans Astris), chrono de session, boutons « Voir sur l'eShop » et « Astris ». Textes et boutons personnalisables, globalement ou par jeu.
 **En pause** : sans clavier, souris ni manette pendant 15 min (réglable), « En pause · Sur Astris », sans chrono.
 **Dans le menu d'Astris** : « Dans le menu » avec le logo Astris.
 
@@ -28,6 +28,7 @@ Prérequis : macOS 13+, Discord desktop lancé.
 - Favoris : jeux étoilés dans Réglages → Jeux
 - Afficher sur Discord (⌃⌥⌘D partout dans macOS)
 - Masquer ce jeu sur Discord (⌃⌥⌘H), en jeu seulement
+- Mode streamer
 - Réglages… (⌘,)
 - Mettre à jour vers vX (si dispo) / Rechercher les mises à jour… / version
 - Copier le diagnostic : état, jeu, TitleID, sources de jaquette, journal récent — à coller dans une issue
@@ -35,10 +36,22 @@ Prérequis : macOS 13+, Discord desktop lancé.
 
 ## Réglages
 
-- **Général** : afficher sur Discord, ouvrir à la connexion, raccourcis globaux, délai « En pause » (jamais, 5–30 min), dossier des jeux, dépannage (journal dans `~/Library/Logs/AstrisRPC.log`, vider le cache des jaquettes).
-- **Discord** : lignes 1 et 2 avec variables `{game}`, `{played}`, `{version}` (une partie « · » sans valeur est retirée), bouton eShop, bouton perso (libellé + https) à la place d'« Astris ».
-- **Jeux** : liste des jeux du dossier (jaquette, recherche, ★ favoris). Double-clic ou « Lancer dans Astris » ouvre le jeu. Par jeu : afficher ou masquer sur Discord (liste noire → « En jeu · Sur Astris », sans nom ni jaquette), nom affiché, jaquette perso (URL https, ou image glissée/choisie : visible dans l'app seulement), type (jeu de base, mise à jour, DLC) et TitleID. Réglages liés au nom du fichier.
-- **Statistiques** : temps joué cette semaine et au total, par jeu, compté par l'app (pauses exclues). `~/Library/Application Support/AstrisRPC/history.json`.
+- **Général** : afficher sur Discord, ouvrir à la connexion, raccourcis globaux, délai « En pause » (jamais, 5–30 min), langue (Mac / français / anglais), dossier des jeux (repris d'Astris si vide), notifications (Discord déconnecté, mise à jour, bilan du dimanche soir), dépannage (journal dans `~/Library/Logs/AstrisRPC.log`, vider le cache des jaquettes).
+- **Discord** : mode streamer (cache temps joué / bouton eShop / jaquettes), lignes 1 et 2 avec variables `{game}`, `{played}`, `{version}`, `{mode}`, `{multi}` (une partie « · » sans valeur est retirée), clé SteamGridDB (+ « Préférer SteamGridDB »), bouton eShop, bouton perso (libellé + https) à la place d'« Astris ».
+- **Jeux** : liste des jeux du dossier (jaquette, recherche, ★ favoris). Double-clic ou « Lancer dans Astris » ouvre le jeu. Par jeu : afficher ou masquer sur Discord (liste noire → « En jeu · Sur Astris », sans nom ni jaquette), nom affiché, texte propre au jeu, temps joué masquable, jaquette perso (URL https, ou image glissée/choisie : visible dans l'app seulement), type (jeu de base, mise à jour, DLC) et TitleID. Réglages liés au nom du fichier.
+- **Statistiques** : temps joué cette semaine et au total, graphe 7 jours / 4 semaines, par jeu (tri plus joué / plus récent, temps compté par Astris à côté), export CSV. Compté par l'app, pauses exclues. `~/Library/Application Support/AstrisRPC/history.json`.
+
+## Liens `astrisrpc://`
+
+Pour Raccourcis, Raycast, Alfred ou `open` dans le Terminal :
+
+| Lien | Effet |
+| --- | --- |
+| `astrisrpc://on` / `off` / `toggle` | affichage sur Discord |
+| `astrisrpc://hide-game` | masquer / réafficher le jeu en cours |
+| `astrisrpc://streamer` (`?on=1` / `?on=0`) | mode streamer |
+| `astrisrpc://launch?game=Zelda` | lancer un jeu (récents, favoris, puis dossier des jeux) |
+| `astrisrpc://settings` | ouvrir les Réglages |
 
 ## Langue
 
@@ -53,7 +66,8 @@ L'app vérifie les releases GitHub au lancement puis toutes les 6 h. L'alerte af
 - **Astris** : notifications de lancement/fermeture (`NSWorkspace`) ; aucune vérification tant qu'Astris est fermé.
 - **Jeu** : fichier ouvert par Astris (`.xci .xcz .nsp .nsz .nro`), via libproc toutes les 3 s, `lsof` en secours au plus toutes les 6 s. Aucune permission macOS requise.
 - **TitleID, titre, temps joué** : `~/Library/Application Support/Astris/games/<TitleID>/gui/metadata.json` (réécrit au lancement du jeu), ou `[01…]` dans le nom du fichier.
-- **Jaquette** : jaquette perso si https, sinon 1ʳᵉ image valide parmi tinfoil.media 1024 px, 512 px et api.nlib.cc (TitleID puis jeu de base), sinon logo Astris.
+- **Jaquette** : jaquette perso si https, sinon 1ʳᵉ image valide parmi tinfoil.media 1024 px, 512 px et api.nlib.cc (TitleID puis jeu de base), puis SteamGridDB par nom si une clé est réglée (ou en premier si préféré), sinon logo Astris.
+- **Config Astris** (`Config.json`) : `game_dirs` (dossier des jeux), `docked_mode` (mode TV/portable), `multiplayer_mode` (multijoueur local). Favoris d'Astris (`metadata.json` → `favorite`) importés une fois par jeu.
 - **Lien eShop** : fiche du jeu via son NSUID (api.nlib.cc), sinon recherche Nintendo.
 - **Cache** : jaquettes et liens eShop trouvés gardés 30 jours, absences 3 jours (`~/Library/Caches/AstrisRPC`), images téléchargées une seule fois.
 - **Version** : mise à jour choisie dans Astris (`games/<TitleID>/updates.json`) ou nom du fichier (`[v1.2.0]`, `[v196608]` → màj 3).
@@ -107,6 +121,10 @@ Sources/AstrisRPC/
   HotKeys.swift        raccourcis globaux
   AstrisLauncher.swift ouvre un jeu dans Astris
   Log.swift            journal d'événements
+  AstrisConfig.swift   Config.json d'Astris (dossiers, mode TV, multijoueur)
+  URLCommand.swift     liens astrisrpc://
+  Notifier.swift       notifications macOS
+  SteamGridDB.swift    jaquettes SteamGridDB
   RecentGames.swift    jeux récents (UserDefaults)
   GameSettings.swift   préférences (dossier, liste noire, noms, jaquettes, favoris, textes)
   GameLibrary.swift    jeux du dossier
