@@ -412,3 +412,226 @@ final class HotKeysTests: XCTestCase {
         XCTAssertNotEqual(HotKeys.Action.toggleDiscord.keyCode, HotKeys.Action.toggleHideGame.keyCode)
     }
 }
+
+final class LanguageTests: XCTestCase {
+    func testResolve() {
+        XCTAssertTrue(L10n.resolve(.system, preferred: ["fr-FR", "en"]))
+        XCTAssertFalse(L10n.resolve(.system, preferred: ["en-US"]))
+        XCTAssertFalse(L10n.resolve(.system, preferred: []))
+        XCTAssertTrue(L10n.resolve(.french, preferred: ["en-US"]))
+        XCTAssertFalse(L10n.resolve(.english, preferred: ["fr-FR"]))
+    }
+
+    func testLanguageSettingPersists() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "AstrisRPCTests-\(UUID().uuidString)"))
+        XCTAssertEqual(GameSettings(defaults: defaults).language, .system)
+        GameSettings(defaults: defaults).language = .english
+        XCTAssertEqual(GameSettings(defaults: defaults).language, .english)
+    }
+}
+
+final class AstrisConfigTests: XCTestCase {
+    func testParse() throws {
+        let json = #"{"game_dirs": ["/Volumes/Switch", ""], "docked_mode": false, "multiplayer_mode": "LdnMitm"}"#
+        let config = try XCTUnwrap(AstrisConfig.parse(Data(json.utf8)))
+        XCTAssertEqual(config.gameDirectories.map(\.path), ["/Volumes/Switch"])
+        XCTAssertEqual(config.docked, false)
+        XCTAssertTrue(config.multiplayer)
+    }
+
+    func testMultiplayerVariants() throws {
+        XCTAssertFalse(try XCTUnwrap(AstrisConfig.parse(Data(#"{"multiplayer_mode": "Disabled"}"#.utf8))).multiplayer)
+        XCTAssertFalse(try XCTUnwrap(AstrisConfig.parse(Data(#"{"multiplayer_mode": 0}"#.utf8))).multiplayer)
+        XCTAssertTrue(try XCTUnwrap(AstrisConfig.parse(Data(#"{"multiplayer_mode": 1}"#.utf8))).multiplayer)
+        let empty = try XCTUnwrap(AstrisConfig.parse(Data("{}".utf8)))
+        XCTAssertNil(empty.docked)
+        XCTAssertFalse(empty.multiplayer)
+        XCTAssertNil(AstrisConfig.parse(Data("nope".utf8)))
+    }
+}
+
+final class ModeTemplateTests: XCTestCase {
+    func testMultiOnlyWhenOn() {
+        L10n.isFrench = true
+        let template = PresenceTemplate.defaultState
+        XCTAssertEqual(PresenceTemplate.render(template, values: ["played": "3 h", "multi": nil]), "Sur Astris · 3 h jouées")
+        XCTAssertEqual(PresenceTemplate.render(template, values: ["played": nil, "multi": "Multijoueur local"]), "Sur Astris · Multijoueur local")
+    }
+}
+
+final class AstrisFavoritesTests: XCTestCase {
+    func testGameInfo() {
+        let info = GameDetector.gameInfo(["favorite": true, "timespan_played": "02:00:00"])
+        XCTAssertTrue(info.favorite)
+        XCTAssertEqual(info.played, 7200)
+        XCTAssertFalse(GameDetector.gameInfo([:]).favorite)
+    }
+
+    func testImportOncePerTitle() throws {
+        let settings = GameSettings(defaults: try XCTUnwrap(UserDefaults(suiteName: "AstrisRPCTests-\(UUID().uuidString)")))
+        let games = [
+            GameLibrary.Game(url: URL(fileURLWithPath: "/g/Zelda.nsp"), name: "Zelda", titleID: "0100F2C0115B6000"),
+            GameLibrary.Game(url: URL(fileURLWithPath: "/g/Mario.xci"), name: "Mario", titleID: "0100EA80032EA000"),
+        ]
+        XCTAssertEqual(settings.importAstrisFavorites(games, astrisFavorites: ["0100F2C0115B6000"]), 1)
+        XCTAssertEqual(settings.favorites, ["/g/Zelda.nsp"])
+        settings.setFavorite(false, for: "/g/Zelda.nsp")
+        XCTAssertEqual(settings.importAstrisFavorites(games, astrisFavorites: ["0100F2C0115B6000"]), 0, "un-starred stays un-starred")
+        XCTAssertTrue(settings.favorites.isEmpty)
+    }
+}
+
+final class PerGameTemplateTests: XCTestCase {
+    func testGameLinesOverrideGlobalOnes() throws {
+        let settings = GameSettings(defaults: try XCTUnwrap(UserDefaults(suiteName: "AstrisRPCTests-\(UUID().uuidString)")))
+        settings.detailsTemplate = "{game}"
+        settings.stateTemplate = "Global"
+        settings.setTemplates(details: "Run any%", state: "  ", for: "/g/Mario.xci")
+        let t = settings.templates(for: "/g/Mario.xci")
+        XCTAssertEqual(t.details, "Run any%")
+        XCTAssertEqual(t.state, "Global", "empty falls back")
+        XCTAssertEqual(settings.templates(for: "/g/Zelda.nsp").details, "{game}")
+        XCTAssertEqual(settings.templates(for: nil).state, "Global")
+    }
+}
+
+final class StreamerModeTests: XCTestCase {
+    func testStreamerModeHidesChosenParts() throws {
+        let settings = GameSettings(defaults: try XCTUnwrap(UserDefaults(suiteName: "AstrisRPCTests-\(UUID().uuidString)")))
+        XCTAssertFalse(settings.hidesPlayedTime("/g/Mario.xci"))
+        XCTAssertFalse(settings.hidesEShop)
+        settings.streamerMode = true
+        XCTAssertTrue(settings.hidesPlayedTime("/g/Mario.xci"))
+        XCTAssertTrue(settings.hidesEShop)
+        XCTAssertFalse(settings.hidesCover, "covers stay by default")
+        settings.streamerHidesPlayed = false
+        XCTAssertFalse(settings.hidesPlayedTime("/g/Mario.xci"))
+        settings.setHidePlayedTime(true, for: "/g/Mario.xci")
+        XCTAssertTrue(settings.hidesPlayedTime("/g/Mario.xci"), "per-game setting")
+    }
+}
+
+final class URLCommandTests: XCTestCase {
+    private func parse(_ s: String) -> URLCommand? { URLCommand.parse(URL(string: s)!) }
+
+    func testParse() {
+        XCTAssertEqual(parse("astrisrpc://toggle"), .toggle)
+        XCTAssertEqual(parse("astrisrpc://on"), .show)
+        XCTAssertEqual(parse("ASTRISRPC://off"), .hide)
+        XCTAssertEqual(parse("astrisrpc:hide-game"), .hideGame)
+        XCTAssertEqual(parse("astrisrpc://streamer"), .streamer(nil))
+        XCTAssertEqual(parse("astrisrpc://streamer?on=1"), .streamer(true))
+        XCTAssertEqual(parse("astrisrpc://launch?game=Zelda%20TOTK"), .launch("Zelda TOTK"))
+        XCTAssertNil(parse("astrisrpc://launch"))
+        XCTAssertNil(parse("astrisrpc://nope"))
+        XCTAssertNil(parse("https://toggle"))
+    }
+
+    func testMatch() {
+        let games = [(path: "/g/a.nsp", name: "The Legend of Zelda: Tears of the Kingdom"),
+                     (path: "/g/b.nsp", name: "Zelda"),
+                     (path: "/g/c.xci", name: "Super Mario Odyssey")]
+        XCTAssertEqual(URLCommand.match("zelda", in: games), "/g/b.nsp", "exact first")
+        XCTAssertEqual(URLCommand.match("tears of the kingdom", in: games), "/g/a.nsp")
+        XCTAssertEqual(URLCommand.match("Mario", in: games), "/g/c.xci")
+        XCTAssertNil(URLCommand.match("Kirby", in: games))
+    }
+}
+
+final class NotifierTests: XCTestCase {
+    private func calendar() -> Calendar {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "UTC")!
+        c.firstWeekday = 2
+        return c
+    }
+
+    func testSummaryDueSundayEveningOncePerWeek() throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "AstrisRPCTests-\(UUID().uuidString)"))
+        let notifier = Notifier(defaults: defaults)
+        let cal = calendar()
+        let sundayEvening = try XCTUnwrap(cal.date(from: DateComponents(year: 2026, month: 11, day: 1, hour: 20)))
+        let sundayNoon = try XCTUnwrap(cal.date(from: DateComponents(year: 2026, month: 11, day: 1, hour: 12)))
+        let monday = try XCTUnwrap(cal.date(from: DateComponents(year: 2026, month: 11, day: 2, hour: 20)))
+        XCTAssertFalse(notifier.isSummaryDue(now: sundayNoon, calendar: cal))
+        XCTAssertFalse(notifier.isSummaryDue(now: monday, calendar: cal))
+        XCTAssertTrue(notifier.isSummaryDue(now: sundayEvening, calendar: cal))
+        notifier.markSummarySent(now: sundayEvening, calendar: cal)
+        XCTAssertFalse(notifier.isSummaryDue(now: sundayEvening.addingTimeInterval(3600), calendar: cal))
+        XCTAssertTrue(notifier.isSummaryDue(now: sundayEvening.addingTimeInterval(7 * 86400), calendar: cal))
+    }
+
+    func testWeeklySummaryText() {
+        L10n.isFrench = true
+        let now = Date()
+        let rows = [
+            PlayHistory.GameTotal(rom: "z.nsp", name: "Zelda", titleID: nil, total: 99999, recent: 5 * 3600 + 600, lastPlayed: now),
+            PlayHistory.GameTotal(rom: "m.xci", name: "Mario", titleID: nil, total: 9999, recent: 3 * 3600, lastPlayed: now),
+            PlayHistory.GameTotal(rom: "k.xci", name: "Kirby", titleID: nil, total: 30, recent: 30, lastPlayed: now),
+        ]
+        XCTAssertEqual(Notifier.weeklySummary(rows, name: \.name), "8 h 10 cette semaine sur 2 jeux, surtout Zelda (5 h 10).")
+        XCTAssertEqual(Notifier.weeklySummary(Array(rows.suffix(2)), name: \.name), "3 h 00 cette semaine, sur Mario.")
+        XCTAssertNil(Notifier.weeklySummary([rows[2]], name: \.name))
+    }
+}
+
+final class StatsExtrasTests: XCTestCase {
+    func testBucketsSplitSessions() {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "UTC")!
+        let history = PlayHistory(file: nil)
+        let midnight = cal.date(from: DateComponents(year: 2026, month: 10, day: 28))!
+        // 23:30 → 00:30: half on each day.
+        history.update(name: "Zelda", titleID: nil, romPath: "/z.nsp", now: midnight - 1800)
+        stride(from: -1800.0, through: 1800, by: 30).forEach {
+            history.update(name: "Zelda", titleID: nil, romPath: "/z.nsp", now: midnight + $0)
+        }
+        let days = PlayHistory.days(2, now: midnight + 3600, calendar: cal)
+        XCTAssertEqual(days.first?.start, midnight - 86400)
+        XCTAssertEqual(history.totals(in: days).map(\.seconds), [1800, 1800])
+        XCTAssertEqual(PlayHistory.weeks(4, now: midnight, calendar: cal).count, 4)
+    }
+
+    func testCSV() {
+        let history = PlayHistory(file: nil)
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        history.update(name: "Zelda, TOTK", titleID: "0100F2C0115B6000", romPath: "/z.nsp", now: t0)
+        history.update(name: "Zelda, TOTK", titleID: "0100F2C0115B6000", romPath: "/z.nsp", now: t0 + 60)
+        let lines = history.csv { $0.name }.split(separator: "\n")
+        XCTAssertEqual(lines.first, "game,file,title_id,start,end,minutes")
+        XCTAssertTrue(lines[1].hasPrefix("\"Zelda, TOTK\",z.nsp,0100F2C0115B6000,"))
+        XCTAssertTrue(lines[1].hasSuffix(",1"))
+    }
+}
+
+final class SteamGridDBTests: XCTestCase {
+    func testURLsAndParsing() {
+        XCTAssertEqual(SteamGridDB.searchURL("Zelda: TOTK/2")?.absoluteString,
+                       "https://www.steamgriddb.com/api/v2/search/autocomplete/Zelda:%20TOTK%2F2")
+        XCTAssertEqual(SteamGridDB.gridsURL(gameID: 42)?.absoluteString,
+                       "https://www.steamgriddb.com/api/v2/grids/game/42?dimensions=512x512,1024x1024&types=static")
+        let body = Data(#"{"success": true, "data": [{"id": 42, "name": "Zelda"}]}"#.utf8)
+        XCTAssertEqual((SteamGridDB.data(body)?.first?["id"] as? NSNumber)?.intValue, 42)
+        XCTAssertNil(SteamGridDB.data(Data(#"{"success": false}"#.utf8)))
+    }
+
+    func testNoKeyNoLookup() {
+        let sgdb = SteamGridDB(store: nil)
+        XCTAssertNil(sgdb.cover(forName: "Zelda", apiKey: nil))
+        XCTAssertNil(sgdb.cover(forName: "Zelda", apiKey: ""))
+    }
+
+    func testStoredCoverAndOrder() throws {
+        let store = DiskStore(file: nil)
+        store.set("https://sgdb/zelda.png", for: "zelda")
+        XCTAssertEqual(SteamGridDB(store: store).cover(forName: "Zelda", apiKey: "k"), "https://sgdb/zelda.png")
+
+        let settings = GameSettings(defaults: try XCTUnwrap(UserDefaults(suiteName: "AstrisRPCTests-\(UUID().uuidString)")))
+        XCTAssertEqual(settings.pickCover(switchArt: { "switch" }, steamGridDB: { "sgdb" }), "switch", "no key: Switch art only")
+        settings.steamGridDBKey = "k"
+        XCTAssertEqual(settings.pickCover(switchArt: { nil }, steamGridDB: { "sgdb" }), "sgdb", "fallback")
+        XCTAssertEqual(settings.pickCover(switchArt: { "switch" }, steamGridDB: { "sgdb" }), "switch")
+        settings.preferSteamGridDB = true
+        XCTAssertEqual(settings.pickCover(switchArt: { "switch" }, steamGridDB: { "sgdb" }), "sgdb")
+    }
+}

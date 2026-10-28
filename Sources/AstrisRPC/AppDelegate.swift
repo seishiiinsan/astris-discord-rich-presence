@@ -14,6 +14,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let recents = RecentGames()
     private let idle = IdleMonitor()
     private let history = PlayHistory()
+    private var astrisConfig: AstrisConfig?
+    private let notifier = Notifier()
+    private var summaryTimer: Timer?
+    /// Touched only on discordQueue: notify once per lost connection.
+    private var notifiedDiscordLost = false
+    private var notifiedUpdate: String?
+    private var astrisConfigDate = Date.distantPast
     private var isIdle = false
     private var thumbnails: [String: NSImage] = [:]
     private var loadingThumbnails: Set<String> = []
@@ -35,6 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let gameItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let discordItem = NSMenuItem(title: "", action: #selector(openDiscord), keyEquivalent: "")
     private let enabledItem = NSMenuItem(title: L10n.tr("Afficher sur Discord", "Show on Discord"), action: #selector(toggleEnabled), keyEquivalent: "")
+    private let streamerItem = NSMenuItem(title: L10n.tr("Mode streamer", "Streamer Mode"), action: #selector(toggleStreamer), keyEquivalent: "")
     private let hideGameItem = NSMenuItem(title: L10n.tr("Masquer ce jeu sur Discord", "Hide This Game on Discord"), action: #selector(toggleHideGame), keyEquivalent: "")
     private let hotKeys = HotKeys()
     private let settingsItem = NSMenuItem(title: L10n.tr("Réglages…", "Settings…"), action: #selector(openSettings), keyEquivalent: ",")
@@ -70,6 +78,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settingsObserver = settings.objectWillChange.sink { [weak self] _ in
             DispatchQueue.main.async {
                 self?.syncHotKeys()
+                self?.importAstrisFavorites()
                 self?.tick()
             }
         }
@@ -86,10 +95,70 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         center.addObserver(self, selector: #selector(appTerminated(_:)),
                            name: NSWorkspace.didTerminateApplicationNotification, object: nil)
         astris = NSWorkspace.shared.runningApplications.first(where: isAstris)
+        adoptAstrisGamesFolder()
+        importAstrisFavorites()
         astrisChanged()
         checkUpdates(manual: false)
         updateTimer = Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { [weak self] _ in
             self?.checkUpdates(manual: false)
+        }
+        notifier.requestAuthorization()
+        summaryTimer = Timer.scheduledTimer(withTimeInterval: 30 * 60, repeats: true) { [weak self] _ in
+            self?.sendWeeklySummaryIfDue()
+        }
+        sendWeeklySummaryIfDue()
+    }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls {
+            guard let command = URLCommand.parse(url) else {
+                Log.shared.add("Unknown link: \(url.absoluteString)")
+                continue
+            }
+            Log.shared.add("Link: \(url.absoluteString)")
+            run(command)
+        }
+    }
+
+    private func run(_ command: URLCommand) {
+        switch command {
+        case .show: if !enabled { toggleEnabled() }
+        case .hide: if enabled { toggleEnabled() }
+        case .toggle: toggleEnabled()
+        case .hideGame: toggleHideGame()
+        case .streamer(let on):
+            settings.streamerMode = on ?? !settings.streamerMode
+            tick()
+        case .settings: openSettings()
+        case .launch(let name): launch(named: name)
+        }
+    }
+
+    /// Looks in recents, favorites, then the games folder.
+    private func launch(named name: String) {
+        var games = recents.entries.map { (path: $0.romPath, name: settings.displayName(for: $0.romPath, detected: $0.name)) }
+        games += settings.favorites.map { path -> (path: String, name: String) in
+            let file = ((path as NSString).lastPathComponent as NSString).deletingPathExtension
+            return (path: path, name: settings.displayName(for: path, detected: GameDetector.cleanName(file)))
+        }
+        if let path = URLCommand.match(name, in: games) {
+            AstrisLauncher.open(path)
+            return
+        }
+        guard let folder = settings.gamesFolder else { NSSound.beep(); return }
+        let known = settings.knownTitleIDs
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let library = GameLibrary.scan(folder, known: known)
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                let all = library.map { (path: $0.url.path, name: self.settings.displayName(for: $0.url.path, detected: $0.name)) }
+                if let path = URLCommand.match(name, in: all) {
+                    AstrisLauncher.open(path)
+                } else {
+                    Log.shared.add("No game matches “\(name)”")
+                    NSSound.beep()
+                }
+            }
         }
     }
 
@@ -99,6 +168,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if discord.isConnected { _ = discord.setActivity(nil) }
             discord.disconnect()
         }
+    }
+
+    /// Astris' Config.json, re-read at most every 30 s.
+    private func currentAstrisConfig() -> AstrisConfig? {
+        if Date().timeIntervalSince(astrisConfigDate) > 30 {
+            astrisConfig = AstrisConfig.load()
+            astrisConfigDate = Date()
+        }
+        return astrisConfig
+    }
+
+    private var favoritesFolder: URL?
+
+    /// Stars Astris' favorites found in the games folder (in the background: the scan reads the disk).
+    private func importAstrisFavorites() {
+        guard let folder = settings.gamesFolder, folder != favoritesFolder else { return }
+        favoritesFolder = folder
+        let known = settings.knownTitleIDs
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let info = GameDetector.astrisGameInfo()
+            let favorites = Set(info.filter { $0.value.favorite }.keys)
+            guard !favorites.isEmpty else { return }
+            let games = GameLibrary.scan(folder, known: known, titles: GameDetector.metadataTitleIndex())
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                let added = settings.importAstrisFavorites(games, astrisFavorites: favorites)
+                if added > 0 { Log.shared.add("Imported \(added) favorite(s) from Astris") }
+            }
+        }
+    }
+
+    /// No folder chosen yet: use the one set in Astris.
+    private func adoptAstrisGamesFolder() {
+        guard settings.gamesFolder == nil, let folder = AstrisConfig.load()?.existingGameDirectories.first else { return }
+        settings.gamesFolder = folder
+        Log.shared.add("Games folder taken from Astris: \(FolderPicker.abbreviated(folder))")
     }
 
     // MARK: - Loop
@@ -164,28 +269,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     buttons: [("Astris", Self.astrisURL)])
             } else if let game = detector.game {
                 let name = detector.romPath.map { settings.displayName(for: $0, detected: game.name) } ?? game.name
+                let config = currentAstrisConfig()
+                let mode: String? = config?.docked.map { $0 ? L10n.tr("Mode TV", "TV mode") : L10n.tr("Mode portable", "Handheld") }
                 // "1.2.0" -> "v1.2.0"; "update 3" stays as is.
                 let version = game.version.map { $0.first?.isNumber == true ? "v\($0)" : $0 }
                 let values: [String: String?] = [
                     "game": name,
-                    "played": game.playedTime.flatMap(Self.formatPlayed),
+                    "played": settings.hidesPlayedTime(detector.romPath) ? nil : game.playedTime.flatMap(Self.formatPlayed),
                     "version": version,
+                    "mode": mode,
+                    "multi": config?.multiplayer == true ? L10n.tr("Multijoueur local", "Local multiplayer") : nil,
                 ]
                 var buttons: [(label: String, url: String)] = []
-                if settings.showEShopButton {
+                if !settings.hidesEShop {
                     buttons.append((L10n.tr("Voir sur l'eShop", "View on eShop"), eShop.url(titleID: game.titleID, name: game.name)))
                 }
                 buttons.append(settings.customButton ?? ("Astris", Self.astrisURL))
-                let cover = detector.romPath.flatMap(settings.discordCover(for:)) ?? game.titleID.flatMap(covers.cover(for:))
+                let cover = settings.hidesCover ? nil
+                    : detector.romPath.flatMap(settings.discordCover(for:)) ?? settings.pickCover(
+                        switchArt: { game.titleID.flatMap(covers.cover(for:)) },
+                        steamGridDB: { SteamGridDB.shared.cover(forName: game.name, apiKey: settings.steamGridDBKey) })
+                let templates = settings.templates(for: detector.romPath)
                 presence = Presence(
-                    details: PresenceTemplate.render(Self.template(settings.detailsTemplate, PresenceTemplate.defaultDetails), values: values) ?? name,
-                    state: PresenceTemplate.render(Self.template(settings.stateTemplate, PresenceTemplate.defaultState), values: values),
+                    details: PresenceTemplate.render(Self.template(templates.details, PresenceTemplate.defaultDetails), values: values) ?? name,
+                    state: PresenceTemplate.render(Self.template(templates.state, PresenceTemplate.defaultState), values: values),
                     start: game.start,
                     image: cover ?? Self.astrisLogo,
                     imageText: name,
                     // Astris badge on the cover, with the game version when known.
                     smallImage: cover == nil ? nil : Self.astrisLogo,
-                    smallText: version.map { "Astris · \($0)" } ?? "Astris",
+                    smallText: (["Astris", version, mode] as [String?]).compactMap { $0 }.joined(separator: " · "),
                     buttons: buttons)
             } else {
                 presence = Presence(
@@ -246,6 +359,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 }
                 connectBackoff = 3
                 Log.shared.add("Connected to Discord")
+                notifiedDiscordLost = false
                 DispatchQueue.main.async { self.discordError = nil }
             }
             switch discord.setActivity(presence?.activity) {
@@ -262,6 +376,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             case .failed:
                 Log.shared.add("Discord connection lost")
                 hasSent = false
+                if presence != nil, !notifiedDiscordLost {
+                    notifiedDiscordLost = true
+                    DispatchQueue.main.async { self.notifyDiscordLost() }
+                }
             }
         }
     }
@@ -303,7 +421,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         enabledItem.image = Self.symbol("eye")
         hideGameItem.image = Self.symbol("eye.slash")
         settingsItem.image = Self.symbol("gearshape")
-        for item in [enabledItem, hideGameItem, settingsItem] {
+        streamerItem.image = Self.symbol("video")
+        for item in [enabledItem, hideGameItem, streamerItem, settingsItem] {
             item.target = self
             menu.addItem(item)
         }
@@ -434,6 +553,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         enabledItem.state = enabled ? .on : .off
+        streamerItem.state = settings.streamerMode ? .on : .off
         hideGameItem.isHidden = detector.game == nil
         hideGameItem.state = detector.romPath.map(settings.isHidden) == true ? .on : .off
         let shortcutMask: NSEvent.ModifierFlags = [.control, .option, .command]
@@ -487,6 +607,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         tick()
     }
 
+    @objc private func toggleStreamer() {
+        settings.streamerMode.toggle()
+        Log.shared.add(settings.streamerMode ? "Streamer mode on" : "Streamer mode off")
+        tick()
+    }
+
     /// Blacklists (or not) the game being played, without opening Settings.
     @objc private func toggleHideGame() {
         guard let rom = detector.romPath else { NSSound.beep(); return }
@@ -508,6 +634,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             settingsWindow = SettingsWindowController(settings: settings, covers: covers, recents: recents, history: history)
         }
         settingsWindow?.show()
+    }
+
+    // MARK: - Notifications
+
+    private func notifyDiscordLost() {
+        guard settings.notifyDiscordLost else { return }
+        notifier.send(
+            id: "discord-lost",
+            title: L10n.tr("Discord déconnecté", "Discord disconnected"),
+            body: L10n.tr("Ton jeu n'est plus affiché. Nouvel essai automatique dès que Discord revient.",
+                          "Your game is no longer shown. It retries as soon as Discord is back."))
+    }
+
+    private func sendWeeklySummaryIfDue() {
+        guard settings.notifyWeeklySummary, notifier.isSummaryDue() else { return }
+        notifier.markSummarySent()
+        let rows = history.totals(recentSince: PlayHistory.startOfWeek())
+        guard let body = Notifier.weeklySummary(rows, name: { self.settings.displayName(for: $0.rom, detected: $0.name) }) else { return }
+        notifier.send(id: "weekly-summary", title: L10n.tr("Ta semaine sur Astris", "Your week on Astris"), body: body)
+        Log.shared.add("Weekly summary sent")
     }
 
     // MARK: - Diagnostic
@@ -541,6 +687,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 lines.append("Cover sources: " + CoverResolver.candidates(for: id).joined(separator: ", "))
             }
             if let rom = detector.romPath { lines.append("Hidden: \(settings.isHidden(rom))") }
+            lines.append("Streamer mode: \(settings.streamerMode)")
         } else {
             lines.append("Game: none")
         }
@@ -575,6 +722,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             let release = try? result.get()
             availableUpdate = release
+            if let release, !manual, settings.notifyUpdates, notifiedUpdate != release.version {
+                notifiedUpdate = release.version
+                notifier.send(
+                    id: "update-\(release.version)",
+                    title: L10n.tr("Astris RPC \(release.version) disponible", "Astris RPC \(release.version) available"),
+                    body: L10n.tr("Menu → Mettre à jour.", "Menu → Update."))
+            }
             if let release {
                 updateItem.title = L10n.tr("Mettre à jour vers v\(release.version)", "Update to v\(release.version)")
                 updateItem.isHidden = false

@@ -1,4 +1,5 @@
 import AppKit
+import Charts
 import ServiceManagement
 import SwiftUI
 import UniformTypeIdentifiers
@@ -57,6 +58,19 @@ final class SettingsWindowController: NSWindowController {
     }
 }
 
+// MARK: - Relaunch
+
+enum Relauncher {
+    /// Starts a fresh copy once this one has quit.
+    static func relaunch() {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/bin/sh")
+        task.arguments = ["-c", "while kill -0 \(getpid()) 2>/dev/null; do sleep 0.2; done; open \"\(Bundle.main.bundlePath)\""]
+        try? task.run()
+        NSApp.terminate(nil)
+    }
+}
+
 // MARK: - Folder picking
 
 enum FolderPicker {
@@ -71,9 +85,10 @@ enum FolderPicker {
         return panel.runModal() == .OK ? panel.url : nil
     }
 
-    /// Folder of the last game seen running, offered when no folder is set yet.
+    /// Astris' own games folder, else the folder of the last game seen running.
     static func suggestion(from recents: RecentGames) -> URL? {
-        recents.entries.first.map { URL(fileURLWithPath: $0.romPath).deletingLastPathComponent() }
+        AstrisConfig.load()?.existingGameDirectories.first
+            ?? recents.entries.first.map { URL(fileURLWithPath: $0.romPath).deletingLastPathComponent() }
     }
 
     static func abbreviated(_ url: URL) -> String {
@@ -102,6 +117,19 @@ struct GeneralSettingsView: View {
                 Picker(L10n.tr("Afficher « En pause » après", "Show “Idle” after"), selection: $settings.idleMinutes) {
                     ForEach(GameSettings.idleChoices, id: \.self) { minutes in
                         Text(minutes == 0 ? L10n.tr("Jamais", "Never") : "\(minutes) min").tag(minutes)
+                    }
+                }
+                Picker(L10n.tr("Langue", "Language"), selection: $settings.language) {
+                    Text(L10n.tr("Comme le Mac", "Same as the Mac")).tag(L10n.Language.system)
+                    Text("Français").tag(L10n.Language.french)
+                    Text("English").tag(L10n.Language.english)
+                }
+                if L10n.resolve(settings.language, preferred: Locale.preferredLanguages) != L10n.isFrench {
+                    HStack {
+                        Text(L10n.tr("Appliquée au prochain lancement.", "Applies at next launch."))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button(L10n.tr("Relancer", "Relaunch"), action: Relauncher.relaunch)
                     }
                 }
             } footer: {
@@ -140,6 +168,14 @@ struct GeneralSettingsView: View {
                     "Games in this folder appear in the Games tab."))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Section {
+                Toggle(L10n.tr("Discord déconnecté en jeu", "Discord disconnected while playing"), isOn: $settings.notifyDiscordLost)
+                Toggle(L10n.tr("Mise à jour disponible", "Update available"), isOn: $settings.notifyUpdates)
+                Toggle(L10n.tr("Bilan de la semaine (dimanche soir)", "Weekly summary (Sunday evening)"), isOn: $settings.notifyWeeklySummary)
+            } header: {
+                Text("Notifications")
             }
 
             Section {
@@ -193,8 +229,41 @@ struct DiscordSettingsView: View {
                 Text(L10n.tr("Texte", "Text"))
             } footer: {
                 Text(L10n.tr(
-                    "Variables : {game} nom du jeu, {played} temps déjà joué, {version} version du jeu. Une partie « · » dont la variable est inconnue est retirée. Vide : texte par défaut.",
-                    "Variables: {game} game name, {played} time already played, {version} game version. A “ · ” part whose variable is unknown is left out. Empty: default text."))
+                    "Variables : {game} nom du jeu, {played} temps déjà joué, {version} version, {mode} mode TV ou portable, {multi} « Multijoueur local » si actif dans Astris. Une partie « · » dont la variable est inconnue est retirée. Vide : texte par défaut.",
+                    "Variables: {game} game name, {played} time already played, {version} version, {mode} TV or handheld mode, {multi} “Local multiplayer” when on in Astris. A “ · ” part whose variable is unknown is left out. Empty: default text."))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Section {
+                Toggle(L10n.tr("Mode streamer", "Streamer mode"), isOn: $settings.streamerMode)
+                Group {
+                    Toggle(L10n.tr("Cacher le temps joué", "Hide play time"), isOn: $settings.streamerHidesPlayed)
+                    Toggle(L10n.tr("Cacher le bouton eShop", "Hide the eShop button"), isOn: $settings.streamerHidesEShop)
+                    Toggle(L10n.tr("Cacher les jaquettes", "Hide covers"), isOn: $settings.streamerHidesCover)
+                }
+                .disabled(!settings.streamerMode)
+                .padding(.leading, 16)
+            } footer: {
+                Text(L10n.tr(
+                    "Aussi dans le menu. Pour cacher un jeu entier : onglet Jeux.",
+                    "Also in the menu. To hide a whole game: Games tab."))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Section {
+                SecureField(L10n.tr("Clé API", "API key"), text: Binding(
+                    get: { settings.steamGridDBKey ?? "" },
+                    set: { settings.steamGridDBKey = $0.isEmpty ? nil : $0 }))
+                Toggle(L10n.tr("Préférer SteamGridDB", "Prefer SteamGridDB"), isOn: $settings.preferSteamGridDB)
+                    .disabled(settings.steamGridDBKey == nil)
+            } header: {
+                Text("SteamGridDB")
+            } footer: {
+                Text(L10n.tr(
+                    "Jaquettes en plus, cherchées par nom : homebrew et jeux sans TitleID compris. Clé gratuite sur steamgriddb.com → Préférences → API.",
+                    "Extra covers, found by name: homebrew and games without a TitleID included. Free key at steamgriddb.com → Preferences → API."))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -369,7 +438,7 @@ private struct GameRow: View {
     var body: some View {
         let hidden = settings.isHidden(game.url.path)
         HStack(spacing: 10) {
-            CoverView(titleID: game.titleID, covers: covers, size: 32, customCover: settings.prefs(for: game.url.path).customCover)
+            CoverView(titleID: game.titleID, covers: covers, size: 32, customCover: settings.prefs(for: game.url.path).customCover, name: game.name, settings: settings)
                 .opacity(hidden ? 0.45 : 1)
             VStack(alignment: .leading, spacing: 2) {
                 Text(settings.displayName(for: game.url.path, detected: game.name))
@@ -403,6 +472,8 @@ private struct GameDetailView: View {
     let covers: CoverResolver
     @State private var name = ""
     @State private var coverLink = ""
+    @State private var details = ""
+    @State private var state = ""
 
     private var path: String { game.url.path }
 
@@ -418,7 +489,7 @@ private struct GameDetailView: View {
     var body: some View {
         VStack(spacing: 0) {
             VStack(spacing: 10) {
-                CoverView(titleID: game.titleID, covers: covers, size: 112, customCover: settings.prefs(for: path).customCover)
+                CoverView(titleID: game.titleID, covers: covers, size: 112, customCover: settings.prefs(for: path).customCover, name: game.name, settings: settings)
                     .shadow(color: .black.opacity(0.2), radius: 8, y: 4)
                     .dropDestination(for: URL.self) { urls, _ in
                         guard let url = urls.first else { return false }
@@ -451,6 +522,10 @@ private struct GameDetailView: View {
                     Toggle(L10n.tr("Afficher sur Discord", "Show on Discord"), isOn: Binding(
                         get: { !settings.isHidden(path) },
                         set: { settings.setHidden(!$0, for: path) }))
+                    Toggle(L10n.tr("Cacher le temps joué", "Hide play time"), isOn: Binding(
+                        get: { settings.prefs(for: path).hidePlayedTime },
+                        set: { settings.setHidePlayedTime($0, for: path) }))
+                        .disabled(settings.isHidden(path))
                 } footer: {
                     Text(settings.isHidden(path)
                          ? L10n.tr("Discord affichera seulement « En jeu · Sur Astris », sans nom ni jaquette.",
@@ -482,6 +557,19 @@ private struct GameDetailView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 Section {
+                    TextField(L10n.tr("Ligne 1", "Line 1"), text: $details, prompt: Text(settings.detailsTemplate ?? PresenceTemplate.defaultDetails))
+                        .onChange(of: details) { _ in saveTemplates() }
+                    TextField(L10n.tr("Ligne 2", "Line 2"), text: $state, prompt: Text(settings.stateTemplate ?? PresenceTemplate.defaultState))
+                        .onChange(of: state) { _ in saveTemplates() }
+                } header: {
+                    Text(L10n.tr("Texte pour ce jeu", "Text for this game"))
+                } footer: {
+                    Text(L10n.tr("Vide : texte de l'onglet Discord.", "Empty: text from the Discord tab."))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .disabled(settings.isHidden(path))
+                Section {
                     TextField(L10n.tr("Nom affiché", "Display name"), text: $name, prompt: Text(game.name))
                         .onSubmit { settings.setCustomName(name, for: path) }
                         .onChange(of: name) { settings.setCustomName($0, for: path) }
@@ -512,9 +600,15 @@ private struct GameDetailView: View {
         }
         .onAppear {
             name = settings.prefs(for: path).customName ?? ""
+            details = settings.prefs(for: path).detailsTemplate ?? ""
+            state = settings.prefs(for: path).stateTemplate ?? ""
             let cover = settings.prefs(for: path).customCover
             coverLink = cover.flatMap { URL(string: $0)?.isFileURL == true ? nil : $0 } ?? ""
         }
+    }
+
+    private func saveTemplates() {
+        settings.setTemplates(details: details, state: state, for: path)
     }
 
     private var isLocalCover: Bool {
@@ -550,10 +644,17 @@ struct StatsView: View {
     @ObservedObject var settings: GameSettings
     let covers: CoverResolver
     @State private var confirmClear = false
+    @State private var range = ChartRange.days
+    @State private var order = Order.mostPlayed
+    /// TitleID → time Astris counted, read when the tab opens.
+    @State private var astrisPlayed: [String: TimeInterval] = [:]
+
+    enum ChartRange: Hashable { case days, weeks }
+    enum Order: Hashable { case mostPlayed, recent }
 
     var body: some View {
         let week = PlayHistory.startOfWeek()
-        let rows = history.totals(recentSince: week)
+        let rows = sorted(history.totals(recentSince: week))
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 StatTile(value: PlayHistory.format(history.total(since: week)), label: L10n.tr("Cette semaine", "This week"))
@@ -562,7 +663,7 @@ struct StatsView: View {
                 Divider().frame(height: 40)
                 StatTile(value: "\(rows.count)", label: L10n.tr("Jeux lancés", "Games played"))
             }
-            .padding(.vertical, 16)
+            .padding(.vertical, 12)
             Divider()
             if rows.isEmpty {
                 EmptyStateView(
@@ -572,43 +673,107 @@ struct StatsView: View {
                         "Le temps passé en jeu sur Astris est compté ici à partir de maintenant, sans les pauses.",
                         "Time in game on Astris is counted here from now on, without idle time.")) { EmptyView() }
             } else {
-                List(rows) { row in
-                    HStack(spacing: 10) {
-                        CoverView(titleID: row.titleID, covers: covers, size: 32, customCover: settings.prefs(for: row.rom).customCover)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(settings.displayName(for: row.rom, detected: row.name)).lineLimit(1)
-                            Text(row.lastPlayed.formatted(date: .abbreviated, time: .omitted))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text(PlayHistory.format(row.total)).monospacedDigit()
-                            if row.recent > 0 {
-                                Text(L10n.tr("\(PlayHistory.format(row.recent)) cette semaine", "\(PlayHistory.format(row.recent)) this week"))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                    .padding(.vertical, 2)
-                }
-                .listStyle(.inset)
+                chart.padding(12)
+                Divider()
+                list(rows)
             }
             Divider()
             HStack {
-                Text(L10n.tr("Compté par Astris RPC, hors pauses.", "Counted by Astris RPC, idle time excluded."))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Picker(L10n.tr("Tri", "Sort"), selection: $order) {
+                    Text(L10n.tr("Plus joué", "Most played")).tag(Order.mostPlayed)
+                    Text(L10n.tr("Plus récent", "Most recent")).tag(Order.recent)
+                }
+                .fixedSize()
+                .disabled(rows.isEmpty)
                 Spacer()
+                Button(L10n.tr("Exporter en CSV…", "Export as CSV…"), action: export)
+                    .disabled(rows.isEmpty)
                 Button(L10n.tr("Effacer l'historique…", "Clear History…")) { confirmClear = true }
                     .disabled(rows.isEmpty)
             }
             .padding(10)
         }
-        .frame(width: 700, height: 460)
+        .frame(width: 700, height: 560)
         .confirmationDialog(L10n.tr("Effacer tout l'historique de jeu ?", "Clear all play history?"), isPresented: $confirmClear) {
             Button(L10n.tr("Effacer", "Clear"), role: .destructive) { history.clear() }
+        }
+        .task {
+            let info = await Task.detached { GameDetector.astrisGameInfo() }.value
+            astrisPlayed = info.compactMapValues(\.played)
+        }
+    }
+
+    private var chart: some View {
+        let buckets = range == .days
+            ? history.totals(in: PlayHistory.days(7))
+            : history.totals(in: PlayHistory.weeks(4))
+        return VStack(alignment: .leading, spacing: 8) {
+            Picker("", selection: $range) {
+                Text(L10n.tr("7 jours", "7 days")).tag(ChartRange.days)
+                Text(L10n.tr("4 semaines", "4 weeks")).tag(ChartRange.weeks)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            Chart(buckets) { bucket in
+                BarMark(
+                    x: .value(L10n.tr("Période", "Period"), bucket.start, unit: range == .days ? .day : .weekOfYear),
+                    y: .value(L10n.tr("Heures", "Hours"), bucket.seconds / 3600))
+                    .foregroundStyle(Color.accentColor)
+            }
+            .chartYAxisLabel(L10n.tr("heures", "hours"))
+            .frame(height: 110)
+            .accessibilityLabel(L10n.tr("Temps de jeu par période", "Play time per period"))
+        }
+    }
+
+    private func list(_ rows: [PlayHistory.GameTotal]) -> some View {
+        List(rows) { row in
+            HStack(spacing: 10) {
+                CoverView(titleID: row.titleID, covers: covers, size: 32, customCover: settings.prefs(for: row.rom).customCover, name: row.name, settings: settings)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(settings.displayName(for: row.rom, detected: row.name)).lineLimit(1)
+                    Text(row.lastPlayed.formatted(date: .abbreviated, time: .omitted))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(PlayHistory.format(row.total)).monospacedDigit()
+                    Text(detail(row))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.vertical, 2)
+        }
+        .listStyle(.inset)
+    }
+
+    /// "2 h 05 cette semaine · Astris : 120 h 00"
+    private func detail(_ row: PlayHistory.GameTotal) -> String {
+        var parts: [String] = []
+        if row.recent > 0 { parts.append(L10n.tr("\(PlayHistory.format(row.recent)) cette semaine", "\(PlayHistory.format(row.recent)) this week")) }
+        if let id = row.titleID, let astris = astrisPlayed[id], astris >= 60 {
+            parts.append("Astris : \(PlayHistory.format(astris))")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private func sorted(_ rows: [PlayHistory.GameTotal]) -> [PlayHistory.GameTotal] {
+        order == .recent ? rows.sorted { $0.lastPlayed > $1.lastPlayed } : rows
+    }
+
+    private func export() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.commaSeparatedText]
+        panel.nameFieldStringValue = "astris-sessions.csv"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let csv = history.csv { settings.displayName(for: $0.rom, detected: $0.name) }
+        do {
+            try csv.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            NSAlert(error: error).runModal()
         }
     }
 }
@@ -634,6 +799,9 @@ private struct CoverView: View {
     let size: CGFloat
     /// Overrides the resolved cover (https or file URL).
     var customCover: String? = nil
+    /// For the SteamGridDB lookup.
+    var name: String? = nil
+    var settings: GameSettings = .shared
     @State private var image: NSImage?
 
     var body: some View {
@@ -660,9 +828,12 @@ private struct CoverView: View {
             image = await Self.load(customCover)
             return
         }
-        guard let titleID else { return }
+        guard titleID != nil || name != nil else { return }
         for _ in 0..<20 {
-            if let link = covers.cover(for: titleID) {
+            let link = settings.pickCover(
+                switchArt: { titleID.flatMap(covers.cover(for:)) },
+                steamGridDB: { name.flatMap { SteamGridDB.shared.cover(forName: $0, apiKey: settings.steamGridDBKey) } })
+            if let link {
                 image = await Self.load(link)
                 return
             }

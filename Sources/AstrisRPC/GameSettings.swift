@@ -8,6 +8,10 @@ final class GameSettings: ObservableObject {
         var customName: String?
         /// https URL (shown on Discord too) or file URL of an image copied in Application Support (shown here only).
         var customCover: String?
+        /// Per-game presence lines, over the global ones.
+        var detailsTemplate: String?
+        var stateTemplate: String?
+        var hidePlayedTime = false
 
         init() {}
 
@@ -17,6 +21,9 @@ final class GameSettings: ObservableObject {
             hidden = try c.decodeIfPresent(Bool.self, forKey: .hidden) ?? false
             customName = try c.decodeIfPresent(String.self, forKey: .customName)
             customCover = try c.decodeIfPresent(String.self, forKey: .customCover)
+            detailsTemplate = try c.decodeIfPresent(String.self, forKey: .detailsTemplate)
+            stateTemplate = try c.decodeIfPresent(String.self, forKey: .stateTemplate)
+            hidePlayedTime = try c.decodeIfPresent(Bool.self, forKey: .hidePlayedTime) ?? false
         }
     }
 
@@ -38,6 +45,16 @@ final class GameSettings: ObservableObject {
     private static let buttonURLKey = "customButtonURL"
     private static let favoritesKey = "favoriteGames"
     private static let hotKeysKey = "hotKeys"
+    private static let importedFavoritesKey = "importedAstrisFavorites"
+    private static let streamerKey = "streamerMode"
+    private static let steamGridDBKeyKey = "steamGridDBKey"
+    private static let preferSteamGridDBKey = "preferSteamGridDB"
+    private static let notifyDiscordKey = "notifyDiscordLost"
+    private static let notifyUpdatesKey = "notifyUpdates"
+    private static let notifySummaryKey = "notifyWeeklySummary"
+    private static let streamerPlayedKey = "streamerHidesPlayed"
+    private static let streamerEShopKey = "streamerHidesEShop"
+    private static let streamerCoverKey = "streamerHidesCover"
 
     private let defaults: UserDefaults
 
@@ -104,9 +121,90 @@ final class GameSettings: ObservableObject {
         if on { favorites.append(romPath) }
     }
 
+    /// TitleIDs already taken from Astris' favorites: un-starring one here sticks.
+    private(set) var importedFavorites: Set<String> {
+        didSet { defaults.set(Array(importedFavorites).sorted(), forKey: Self.importedFavoritesKey) }
+    }
+
+    /// Stars the games Astris marks as favorite, once each. Returns how many were added.
+    @discardableResult
+    func importAstrisFavorites(_ games: [GameLibrary.Game], astrisFavorites: Set<String>) -> Int {
+        var added = 0
+        for game in games {
+            guard let id = game.titleID, astrisFavorites.contains(id), !importedFavorites.contains(id) else { continue }
+            importedFavorites.insert(id)
+            if !isFavorite(game.url.path) {
+                setFavorite(true, for: game.url.path)
+                added += 1
+            }
+        }
+        return added
+    }
+
     /// ⌃⌥⌘D / ⌃⌥⌘H anywhere in macOS.
     @Published var hotKeysEnabled: Bool {
         didSet { defaults.set(hotKeysEnabled, forKey: Self.hotKeysKey) }
+    }
+
+    /// Applied at next launch: menus are built once.
+    @Published var language: L10n.Language {
+        didSet { defaults.set(language.rawValue, forKey: L10n.languageKey) }
+    }
+
+    /// The user's own SteamGridDB API key (empty: source off).
+    @Published var steamGridDBKey: String? {
+        didSet { Self.store(steamGridDBKey, Self.steamGridDBKeyKey, in: defaults) }
+    }
+
+    /// Try SteamGridDB before the Switch art sources.
+    @Published var preferSteamGridDB: Bool {
+        didSet { defaults.set(preferSteamGridDB, forKey: Self.preferSteamGridDBKey) }
+    }
+
+    /// Cover from the resolved Switch art and SteamGridDB, in the chosen order.
+    func pickCover(switchArt: () -> String?, steamGridDB: () -> String?) -> String? {
+        guard let key = steamGridDBKey, !key.trimmingCharacters(in: .whitespaces).isEmpty else { return switchArt() }
+        return preferSteamGridDB ? steamGridDB() ?? switchArt() : switchArt() ?? steamGridDB()
+    }
+
+    @Published var notifyDiscordLost: Bool {
+        didSet { defaults.set(notifyDiscordLost, forKey: Self.notifyDiscordKey) }
+    }
+
+    @Published var notifyUpdates: Bool {
+        didSet { defaults.set(notifyUpdates, forKey: Self.notifyUpdatesKey) }
+    }
+
+    @Published var notifyWeeklySummary: Bool {
+        didSet { defaults.set(notifyWeeklySummary, forKey: Self.notifySummaryKey) }
+    }
+
+    /// Streamer mode: hides what's chosen below, on every game, in one switch.
+    @Published var streamerMode: Bool {
+        didSet { defaults.set(streamerMode, forKey: Self.streamerKey) }
+    }
+
+    @Published var streamerHidesPlayed: Bool {
+        didSet { defaults.set(streamerHidesPlayed, forKey: Self.streamerPlayedKey) }
+    }
+
+    @Published var streamerHidesEShop: Bool {
+        didSet { defaults.set(streamerHidesEShop, forKey: Self.streamerEShopKey) }
+    }
+
+    @Published var streamerHidesCover: Bool {
+        didSet { defaults.set(streamerHidesCover, forKey: Self.streamerCoverKey) }
+    }
+
+    func hidesPlayedTime(_ romPath: String?) -> Bool {
+        (streamerMode && streamerHidesPlayed) || (romPath.map { prefs(for: $0).hidePlayedTime } ?? false)
+    }
+
+    var hidesEShop: Bool { !showEShopButton || (streamerMode && streamerHidesEShop) }
+    var hidesCover: Bool { streamerMode && streamerHidesCover }
+
+    func setHidePlayedTime(_ hide: Bool, for romPath: String) {
+        update(romPath) { $0.hidePlayedTime = hide }
     }
 
     @Published var gamesFolder: URL? {
@@ -136,7 +234,18 @@ final class GameSettings: ObservableObject {
         customButtonLabel = defaults.string(forKey: Self.buttonLabelKey)
         customButtonURL = defaults.string(forKey: Self.buttonURLKey)
         favorites = defaults.stringArray(forKey: Self.favoritesKey) ?? []
+        importedFavorites = Set(defaults.stringArray(forKey: Self.importedFavoritesKey) ?? [])
         hotKeysEnabled = defaults.object(forKey: Self.hotKeysKey) as? Bool ?? true
+        streamerMode = defaults.bool(forKey: Self.streamerKey)
+        steamGridDBKey = defaults.string(forKey: Self.steamGridDBKeyKey)
+        preferSteamGridDB = defaults.bool(forKey: Self.preferSteamGridDBKey)
+        notifyDiscordLost = defaults.object(forKey: Self.notifyDiscordKey) as? Bool ?? true
+        notifyUpdates = defaults.object(forKey: Self.notifyUpdatesKey) as? Bool ?? true
+        notifyWeeklySummary = defaults.object(forKey: Self.notifySummaryKey) as? Bool ?? true
+        streamerHidesPlayed = defaults.object(forKey: Self.streamerPlayedKey) as? Bool ?? true
+        streamerHidesEShop = defaults.object(forKey: Self.streamerEShopKey) as? Bool ?? true
+        streamerHidesCover = defaults.object(forKey: Self.streamerCoverKey) as? Bool ?? false
+        language = L10n.Language(rawValue: defaults.string(forKey: L10n.languageKey) ?? "") ?? .system
         prefs = defaults.data(forKey: Self.prefsKey)
             .flatMap { try? JSONDecoder().decode([String: GamePrefs].self, from: $0) } ?? [:]
         knownTitleIDs = defaults.dictionary(forKey: Self.titleIDsKey) as? [String: String] ?? [:]
@@ -171,6 +280,23 @@ final class GameSettings: ObservableObject {
     func setCustomName(_ name: String?, for romPath: String) {
         let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines)
         update(romPath) { $0.customName = (trimmed?.isEmpty ?? true) ? nil : trimmed }
+    }
+
+    /// Lines for this game: its own, else the global ones (nil: default).
+    func templates(for romPath: String?) -> (details: String?, state: String?) {
+        let own = romPath.map(prefs(for:))
+        return (own?.detailsTemplate ?? detailsTemplate, own?.stateTemplate ?? stateTemplate)
+    }
+
+    func setTemplates(details: String?, state: String?, for romPath: String) {
+        func clean(_ s: String?) -> String? {
+            let t = s?.trimmingCharacters(in: .whitespacesAndNewlines)
+            return (t?.isEmpty ?? true) ? nil : t
+        }
+        update(romPath) {
+            $0.detailsTemplate = clean(details)
+            $0.stateTemplate = clean(state)
+        }
     }
 
     /// Web covers show on Discord; local ones only in the app.

@@ -96,6 +96,58 @@ final class PlayHistory: ObservableObject {
         max(0, s.end.timeIntervalSince(max(s.start, date)))
     }
 
+    struct Bucket: Identifiable, Equatable {
+        var id: Date { start }
+        let start: Date
+        let seconds: TimeInterval
+    }
+
+    /// Time played in each interval (sessions split across them).
+    func totals(in intervals: [DateInterval]) -> [Bucket] {
+        intervals.map { interval in
+            Bucket(start: interval.start, seconds: sessions.reduce(0) { sum, s in
+                sum + max(0, min(s.end, interval.end).timeIntervalSince(max(s.start, interval.start)))
+            })
+        }
+    }
+
+    /// The last `count` days, oldest first, today included.
+    static func days(_ count: Int, now: Date = Date(), calendar: Calendar = .current) -> [DateInterval] {
+        let today = calendar.startOfDay(for: now)
+        return (0..<count).reversed().compactMap { back in
+            guard let start = calendar.date(byAdding: .day, value: -back, to: today),
+                  let end = calendar.date(byAdding: .day, value: 1, to: start) else { return nil }
+            return DateInterval(start: start, end: end)
+        }
+    }
+
+    /// The last `count` weeks, oldest first, this week included.
+    static func weeks(_ count: Int, now: Date = Date(), calendar: Calendar = .current) -> [DateInterval] {
+        let week = startOfWeek(now, calendar: calendar)
+        return (0..<count).reversed().compactMap { back in
+            guard let start = calendar.date(byAdding: .weekOfYear, value: -back, to: week),
+                  let end = calendar.date(byAdding: .weekOfYear, value: 1, to: start) else { return nil }
+            return DateInterval(start: start, end: end)
+        }
+    }
+
+    /// One line per session, for a spreadsheet.
+    func csv(name: (Session) -> String) -> String {
+        let formatter = ISO8601DateFormatter()
+        func cell(_ text: String) -> String {
+            text.contains(where: { ",\"\n".contains($0) }) ? "\"" + text.replacingOccurrences(of: "\"", with: "\"\"") + "\"" : text
+        }
+        var lines = ["game,file,title_id,start,end,minutes"]
+        for s in sessions {
+            lines.append([
+                cell(name(s)), cell(s.rom), s.titleID ?? "",
+                formatter.string(from: s.start), formatter.string(from: s.end),
+                String(Int((s.duration / 60).rounded())),
+            ].joined(separator: ","))
+        }
+        return lines.joined(separator: "\n") + "\n"
+    }
+
     static func startOfWeek(_ now: Date = Date(), calendar: Calendar = .current) -> Date {
         calendar.dateInterval(of: .weekOfYear, for: now)?.start ?? now
     }
