@@ -58,6 +58,16 @@ final class SettingsWindowController: NSWindowController {
     }
 }
 
+// MARK: - Layout
+
+enum SettingsLayout {
+    /// Tabs share one height that fits the screen (menu bar, Dock and title bar aside): long tabs scroll.
+    static var height: CGFloat {
+        let visible = NSScreen.main?.visibleFrame.height ?? 800
+        return max(360, min(560, visible - 120))
+    }
+}
+
 // MARK: - Relaunch
 
 enum Relauncher {
@@ -200,8 +210,7 @@ struct GeneralSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 500)
-        .fixedSize(horizontal: false, vertical: true)
+        .frame(width: 500, height: SettingsLayout.height)
         .onAppear { openAtLogin = SMAppService.mainApp.status == .enabled }
     }
 
@@ -288,8 +297,7 @@ struct DiscordSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 500)
-        .fixedSize(horizontal: false, vertical: true)
+        .frame(width: 500, height: SettingsLayout.height)
     }
 
     private func optional(_ key: ReferenceWritableKeyPath<GameSettings, String?>) -> Binding<String> {
@@ -338,7 +346,7 @@ struct GamesSettingsView: View {
                 }
             }
         }
-        .frame(width: 700, height: 460)
+        .frame(width: 700, height: SettingsLayout.height)
         .onAppear(perform: reload)
         .onChange(of: settings.gamesFolder) { _ in reload() }
     }
@@ -693,7 +701,7 @@ struct StatsView: View {
             }
             .padding(10)
         }
-        .frame(width: 700, height: 560)
+        .frame(width: 700, height: SettingsLayout.height)
         .confirmationDialog(L10n.tr("Effacer tout l'historique de jeu ?", "Clear all play history?"), isPresented: $confirmClear) {
             Button(L10n.tr("Effacer", "Clear"), role: .destructive) { history.clear() }
         }
