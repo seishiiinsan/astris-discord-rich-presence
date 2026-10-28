@@ -8,6 +8,9 @@ final class GameSettings: ObservableObject {
         var customName: String?
         /// https URL (shown on Discord too) or file URL of an image copied in Application Support (shown here only).
         var customCover: String?
+        /// Per-game presence lines, over the global ones.
+        var detailsTemplate: String?
+        var stateTemplate: String?
 
         init() {}
 
@@ -17,6 +20,8 @@ final class GameSettings: ObservableObject {
             hidden = try c.decodeIfPresent(Bool.self, forKey: .hidden) ?? false
             customName = try c.decodeIfPresent(String.self, forKey: .customName)
             customCover = try c.decodeIfPresent(String.self, forKey: .customCover)
+            detailsTemplate = try c.decodeIfPresent(String.self, forKey: .detailsTemplate)
+            stateTemplate = try c.decodeIfPresent(String.self, forKey: .stateTemplate)
         }
     }
 
@@ -199,6 +204,23 @@ final class GameSettings: ObservableObject {
     func setCustomName(_ name: String?, for romPath: String) {
         let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines)
         update(romPath) { $0.customName = (trimmed?.isEmpty ?? true) ? nil : trimmed }
+    }
+
+    /// Lines for this game: its own, else the global ones (nil: default).
+    func templates(for romPath: String?) -> (details: String?, state: String?) {
+        let own = romPath.map(prefs(for:))
+        return (own?.detailsTemplate ?? detailsTemplate, own?.stateTemplate ?? stateTemplate)
+    }
+
+    func setTemplates(details: String?, state: String?, for romPath: String) {
+        func clean(_ s: String?) -> String? {
+            let t = s?.trimmingCharacters(in: .whitespacesAndNewlines)
+            return (t?.isEmpty ?? true) ? nil : t
+        }
+        update(romPath) {
+            $0.detailsTemplate = clean(details)
+            $0.stateTemplate = clean(state)
+        }
     }
 
     /// Web covers show on Discord; local ones only in the app.

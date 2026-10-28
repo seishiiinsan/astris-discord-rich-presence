@@ -222,9 +222,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 }
                 buttons.append(settings.customButton ?? ("Astris", Self.astrisURL))
                 let cover = detector.romPath.flatMap(settings.discordCover(for:)) ?? game.titleID.flatMap(covers.cover(for:))
+                let templates = settings.templates(for: detector.romPath)
                 presence = Presence(
-                    details: PresenceTemplate.render(Self.template(settings.detailsTemplate, PresenceTemplate.defaultDetails), values: values) ?? name,
-                    state: PresenceTemplate.render(Self.template(settings.stateTemplate, PresenceTemplate.defaultState), values: values),
+                    details: PresenceTemplate.render(Self.template(templates.details, PresenceTemplate.defaultDetails), values: values) ?? name,
+                    state: PresenceTemplate.render(Self.template(templates.state, PresenceTemplate.defaultState), values: values),
                     start: game.start,
                     image: cover ?? Self.astrisLogo,
                     imageText: name,

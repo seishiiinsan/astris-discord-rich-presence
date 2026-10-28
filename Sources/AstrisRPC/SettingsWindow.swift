@@ -430,6 +430,8 @@ private struct GameDetailView: View {
     let covers: CoverResolver
     @State private var name = ""
     @State private var coverLink = ""
+    @State private var details = ""
+    @State private var state = ""
 
     private var path: String { game.url.path }
 
@@ -509,6 +511,19 @@ private struct GameDetailView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 Section {
+                    TextField(L10n.tr("Ligne 1", "Line 1"), text: $details, prompt: Text(settings.detailsTemplate ?? PresenceTemplate.defaultDetails))
+                        .onChange(of: details) { _ in saveTemplates() }
+                    TextField(L10n.tr("Ligne 2", "Line 2"), text: $state, prompt: Text(settings.stateTemplate ?? PresenceTemplate.defaultState))
+                        .onChange(of: state) { _ in saveTemplates() }
+                } header: {
+                    Text(L10n.tr("Texte pour ce jeu", "Text for this game"))
+                } footer: {
+                    Text(L10n.tr("Vide : texte de l'onglet Discord.", "Empty: text from the Discord tab."))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .disabled(settings.isHidden(path))
+                Section {
                     TextField(L10n.tr("Nom affiché", "Display name"), text: $name, prompt: Text(game.name))
                         .onSubmit { settings.setCustomName(name, for: path) }
                         .onChange(of: name) { settings.setCustomName($0, for: path) }
@@ -539,9 +554,15 @@ private struct GameDetailView: View {
         }
         .onAppear {
             name = settings.prefs(for: path).customName ?? ""
+            details = settings.prefs(for: path).detailsTemplate ?? ""
+            state = settings.prefs(for: path).stateTemplate ?? ""
             let cover = settings.prefs(for: path).customCover
             coverLink = cover.flatMap { URL(string: $0)?.isFileURL == true ? nil : $0 } ?? ""
         }
+    }
+
+    private func saveTemplates() {
+        settings.setTemplates(details: details, state: state, for: path)
     }
 
     private var isLocalCover: Bool {

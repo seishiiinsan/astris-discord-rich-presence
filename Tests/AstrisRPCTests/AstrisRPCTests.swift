@@ -480,3 +480,17 @@ final class AstrisFavoritesTests: XCTestCase {
         XCTAssertTrue(settings.favorites.isEmpty)
     }
 }
+
+final class PerGameTemplateTests: XCTestCase {
+    func testGameLinesOverrideGlobalOnes() throws {
+        let settings = GameSettings(defaults: try XCTUnwrap(UserDefaults(suiteName: "AstrisRPCTests-\(UUID().uuidString)")))
+        settings.detailsTemplate = "{game}"
+        settings.stateTemplate = "Global"
+        settings.setTemplates(details: "Run any%", state: "  ", for: "/g/Mario.xci")
+        let t = settings.templates(for: "/g/Mario.xci")
+        XCTAssertEqual(t.details, "Run any%")
+        XCTAssertEqual(t.state, "Global", "empty falls back")
+        XCTAssertEqual(settings.templates(for: "/g/Zelda.nsp").details, "{game}")
+        XCTAssertEqual(settings.templates(for: nil).state, "Global")
+    }
+}
