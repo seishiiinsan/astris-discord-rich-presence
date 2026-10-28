@@ -380,6 +380,15 @@ private struct GameDetailView: View {
 
     private var path: String { game.url.path }
 
+    static func kindLabel(_ titleID: String) -> String? {
+        switch GameDetector.kind(of: titleID) {
+        case .base: return L10n.tr("Jeu de base", "Base game")
+        case .update: return L10n.tr("Mise à jour", "Update")
+        case .dlc: return "DLC"
+        case nil: return nil
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             VStack(spacing: 10) {
@@ -394,6 +403,13 @@ private struct GameDetailView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
+                if let id = game.titleID {
+                    Text([Self.kindLabel(id), id, GameDetector.version(in: game.url.deletingPathExtension().lastPathComponent)]
+                        .compactMap { $0 }.joined(separator: " · "))
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
             }
             .padding(.top, 24)
             .padding(.horizontal, 24)

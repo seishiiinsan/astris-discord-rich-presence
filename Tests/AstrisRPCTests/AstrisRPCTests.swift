@@ -337,3 +337,34 @@ final class PlayHistoryTests: XCTestCase {
         XCTAssertEqual(PlayHistory.format(3 * 3600 + 5 * 60), "3 h 05")
     }
 }
+
+final class VersionTests: XCTestCase {
+    func testVersionInFileName() {
+        L10n.isFrench = false
+        XCTAssertEqual(GameDetector.version(in: "Zelda [0100F2C0115B6000][v1.2.0]"), "1.2.0")
+        XCTAssertEqual(GameDetector.version(in: "Zelda v1.0.1 (EU)"), "1.0.1")
+        XCTAssertEqual(GameDetector.version(in: "Zelda [0100F2C0115B6800][v196608]"), "update 3")
+        XCTAssertNil(GameDetector.version(in: "Zelda [0100F2C0115B6000][v0]"))
+        XCTAssertNil(GameDetector.version(in: "Zelda Remastered"))
+        XCTAssertNil(GameDetector.version(in: "Mariov2"))
+    }
+
+    func testTitleKinds() {
+        XCTAssertEqual(GameDetector.kind(of: "0100F2C0115B6000"), .base)
+        XCTAssertEqual(GameDetector.kind(of: "0100F2C0115B6800"), .update)
+        XCTAssertEqual(GameDetector.kind(of: "0100F2C0115B7001"), .dlc)
+        XCTAssertNil(GameDetector.kind(of: "nope"))
+        XCTAssertEqual(GameDetector.baseTitleID(of: "0100F2C0115B6800"), "0100F2C0115B6000")
+        XCTAssertEqual(GameDetector.baseTitleID(of: "0100F2C0115B7001"), "0100F2C0115B6000")
+        XCTAssertEqual(GameDetector.baseTitleID(of: "0100F2C0115B6000"), "0100F2C0115B6000")
+    }
+
+    func testSmallImageNeedsWebURL() {
+        var p = Presence(details: "Zelda", image: "https://x/c.png", smallImage: "https://x/l.png", smallText: "Astris · v1.2.0")
+        var assets = p.activity["assets"] as? [String: Any]
+        XCTAssertEqual(assets?["small_text"] as? String, "Astris · v1.2.0")
+        p.smallImage = nil
+        assets = p.activity["assets"] as? [String: Any]
+        XCTAssertNil(assets?["small_text"])
+    }
+}

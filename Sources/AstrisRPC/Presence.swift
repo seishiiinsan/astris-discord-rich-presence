@@ -6,11 +6,15 @@ struct Presence: Equatable {
     var start: Date?
     var image: String?
     var imageText: String?
+    /// Badge in the corner of the large image.
+    var smallImage: String?
+    var smallText: String?
     var buttons: [(label: String, url: String)] = []
 
     static func == (a: Presence, b: Presence) -> Bool {
         a.details == b.details && a.state == b.state && a.start == b.start
             && a.image == b.image && a.imageText == b.imageText
+            && a.smallImage == b.smallImage && a.smallText == b.smallText
             && a.buttons.map { $0.label } == b.buttons.map { $0.label } && a.buttons.map { $0.url } == b.buttons.map { $0.url }
     }
 
@@ -22,6 +26,10 @@ struct Presence: Equatable {
         if let image, Self.isWebURL(image, max: 256) {
             var assets: [String: Any] = ["large_image": image]
             if let imageText { assets["large_text"] = Self.field(imageText) }
+            if let smallImage, Self.isWebURL(smallImage, max: 256) {
+                assets["small_image"] = smallImage
+                if let smallText { assets["small_text"] = Self.field(smallText) }
+            }
             a["assets"] = assets
         }
         let valid = buttons

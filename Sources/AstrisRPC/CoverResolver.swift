@@ -36,8 +36,8 @@ final class CoverResolver {
     }
 
     static func candidates(for titleID: String) -> [String] {
-        // Updates (…800) and DLC share the base game's art (…000).
-        let base = String(titleID.prefix(13)) + "000"
+        // Updates and DLC fall back to the base game's art.
+        let base = GameDetector.baseTitleID(of: titleID)
         var ids = [titleID]
         if base != titleID { ids.append(base) }
         return ids.flatMap { id in [

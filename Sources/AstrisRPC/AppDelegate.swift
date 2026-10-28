@@ -151,21 +151,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     buttons: [("Astris", Self.astrisURL)])
             } else if let game = detector.game {
                 let name = detector.romPath.map { settings.displayName(for: $0, detected: game.name) } ?? game.name
+                // "1.2.0" -> "v1.2.0"; "update 3" stays as is.
+                let version = game.version.map { $0.first?.isNumber == true ? "v\($0)" : $0 }
                 let values: [String: String?] = [
                     "game": name,
                     "played": game.playedTime.flatMap(Self.formatPlayed),
+                    "version": version,
                 ]
                 var buttons: [(label: String, url: String)] = []
                 if settings.showEShopButton {
                     buttons.append((L10n.tr("Voir sur l'eShop", "View on eShop"), eShop.url(titleID: game.titleID, name: game.name)))
                 }
                 buttons.append(settings.customButton ?? ("Astris", Self.astrisURL))
+                let cover = game.titleID.flatMap(covers.cover(for:))
                 presence = Presence(
                     details: PresenceTemplate.render(Self.template(settings.detailsTemplate, PresenceTemplate.defaultDetails), values: values) ?? name,
                     state: PresenceTemplate.render(Self.template(settings.stateTemplate, PresenceTemplate.defaultState), values: values),
                     start: game.start,
-                    image: game.titleID.flatMap(covers.cover(for:)) ?? Self.astrisLogo,
+                    image: cover ?? Self.astrisLogo,
                     imageText: name,
+                    // Astris badge on the cover, with the game version when known.
+                    smallImage: cover == nil ? nil : Self.astrisLogo,
+                    smallText: version.map { "Astris · \($0)" } ?? "Astris",
                     buttons: buttons)
             } else {
                 presence = Presence(
@@ -477,6 +484,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let game = detector.game {
             lines.append("Game: \(game.name)")
             lines.append("TitleID: \(game.titleID ?? "none")")
+            lines.append("Version: \(game.version ?? "unknown")")
             lines.append("ROM: \(detector.romPath.map { ($0 as NSString).lastPathComponent } ?? "?")")
             lines.append("Played before: \(game.playedTime.flatMap(Self.formatPlayed) ?? "unknown")")
             lines.append("Idle: \(isIdle) (\(Int(idle.idleTime)) s without input, threshold \(settings.idleMinutes) min)")
